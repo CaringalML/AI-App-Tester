@@ -1,0 +1,169 @@
+@import 'tailwindcss';
+
+/*
+ * Two layers on purpose.
+ *
+ * The raw values live on :root and get swapped by the light theme block below.
+ * The @theme block only points Tailwind at them. If the hex values were written
+ * directly into @theme, Tailwind would fold opacity modifiers like `bg-accent/12`
+ * into a static colour at build time and they would stop following the theme.
+ * Pointing at a var() forces it to emit a live color-mix instead.
+ */
+:root {
+  /* surfaces, furthest back to closest */
+  --bg: #0a0b0d;
+  --surface: #111317;
+  --raised: #171a20;
+
+  /* lines */
+  --line: #23262e;
+  --line-strong: #32363f;
+
+  /* type, loudest to quietest */
+  --ink: #eceef1;
+  --muted: #99a0aa;
+  --faint: #6b717b;
+
+  --accent: #ff6a2b;
+  --accent-ink: #1a0d05;
+
+  /* severity and category */
+  --critical: #f04438;
+  --high: #ff7a1a;
+  --medium: #e0b038;
+  --low: #5b8def;
+  --improve: #a78bfa;
+
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 28px rgb(0 0 0 / 0.28);
+}
+
+/* Higher specificity than the :root Tailwind emits its own theme vars into. */
+html[data-theme='light'] {
+  --bg: #f6f7f8;
+  --surface: #ffffff;
+  --raised: #fbfbfc;
+
+  --line: #e5e6ea;
+  --line-strong: #d2d4da;
+
+  --ink: #15171c;
+  --muted: #5d636d;
+  --faint: #8a909a;
+
+  --accent: #dd5410;
+  --accent-ink: #ffffff;
+
+  --critical: #d92d20;
+  --high: #d9660f;
+  --medium: #b07d10;
+  --low: #3b6fd4;
+  --improve: #7c5cf0;
+
+  --shadow-panel: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 30px rgb(16 24 40 / 0.07);
+}
+
+/*
+ * Semantic names, not palette names. Every utility in the components resolves
+ * through here, which is why there is not a single `dark:` variant anywhere.
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+
+  --color-critical: var(--critical);
+  --color-high: var(--high);
+  --color-medium: var(--medium);
+  --color-low: var(--low);
+  --color-improve: var(--improve);
+
+  --animate-spin-fast: spin 0.7s linear infinite;
+  --animate-bob: bob 1.8s ease-in-out infinite;
+  --animate-ring: ring 1.4s ease-out infinite;
+  --animate-rise: rise 0.3s ease both;
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: scaleY(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scaleY(1.35);
+    opacity: 1;
+  }
+}
+
+@keyframes ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 9px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/*
+ * The one thing left as hand-written CSS. A radial gradient with an alpha
+ * derived from a themed token is unreadable as an arbitrary utility value.
+ */
+@utility glow {
+  background: radial-gradient(
+    closest-side,
+    color-mix(in oklab, var(--accent) 14%, transparent),
+    transparent 72%
+  );
+}
