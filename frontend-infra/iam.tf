@@ -38,12 +38,12 @@ data "aws_iam_policy_document" "github_trust" {
     }
 
     # Scopes assumption to one repo and one GitHub environment. See
-    # github_environment in variables.tf for why this is environment-based
-    # rather than branch-based.
+    # github_sub_pattern in locals.tf for why this is StringLike against a
+    # wildcard pattern rather than StringEquals against a literal value.
     condition {
-      test     = "StringEquals"
+      test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [local.github_sub]
+      values   = [local.github_sub_pattern]
     }
   }
 }
