@@ -1,10 +1,9 @@
-# Deliberately no aliases and no ACM certificate on this distribution.
-#
-# Cloudflare terminates TLS for the browser using its own edge certificate, and
-# CloudFront answers Cloudflare on its default *.cloudfront.net certificate.
-# CloudFront routes requests by Host header, so it would reject traffic arriving
-# as nodepulsecaringal.xyz. The Cloudflare origin rule in cloudflare.tf rewrites
-# the Host header, and optionally the SNI, to the distribution domain below.
+# The distribution answers to nodepulsecaringal.xyz directly (see aliases,
+# below) using the ACM certificate from acm.tf. That certificate only ever
+# appears on the private hop between Cloudflare and CloudFront — the browser
+# still only ever sees Cloudflare's own certificate, because the Cloudflare
+# DNS record stays proxied. See acm.tf for why this replaced an earlier design
+# that avoided a certificate here entirely.
 
 resource "aws_cloudfront_origin_access_control" "site" {
   name                              = "${var.project_name}-oac"
@@ -51,6 +50,7 @@ resource "aws_cloudfront_distribution" "site" {
   comment             = "${var.project_name} static site, fronted by Cloudflare"
   default_root_object = "index.html"
   price_class         = var.cloudfront_price_class
+  aliases             = local.site_hostnames
 
   origin {
     origin_id                = "s3-${aws_s3_bucket.site.id}"
@@ -93,8 +93,8 @@ resource "aws_cloudfront_distribution" "site" {
   }
 
   viewer_certificate {
-    # This is the whole point of the design. No ACM certificate is issued or
-    # validated, so there is no DNS validation dance and nothing to renew here.
-    cloudfront_default_certificate = true
+    acm_certificate_arn      = aws_acm_certificate_validation.site.certificate_arn
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
   }
 }

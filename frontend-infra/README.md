@@ -5,23 +5,40 @@ served on `nodepulsecaringal.xyz` with Cloudflare handling the browser-facing TL
 
 ## Why Cloudflare terminates TLS, not CloudFront
 
-The usual pattern is an ACM certificate on CloudFront plus a Cloudflare DNS record set
-to DNS-only. This stack does the opposite: the Cloudflare record stays proxied
-(orange-clouded), Cloudflare issues its own certificate for the domain, and CloudFront
-is left on its default `*.cloudfront.net` certificate.
+The Cloudflare DNS record for the domain stays proxied (orange-clouded), so Cloudflare
+issues its own certificate and is the only thing any visitor's browser ever negotiates
+TLS with. That part didn't change. How CloudFront gets satisfied on the other end of
+that connection did.
 
-That means no ACM certificate to request, validate by DNS, and wait on before the first
-`apply` finishes, and one less certificate to renew over the life of the prototype.
-Cloudflare already owned the domain, so it does the one thing CloudFront's default
-certificate can't: answer for `nodepulsecaringal.xyz` by name.
+**First attempt, and why it didn't survive contact with a Free plan.** The original
+version of this stack tried to avoid an ACM certificate entirely: leave CloudFront on
+its default `*.cloudfront.net` certificate, and use a Cloudflare Origin Rule to rewrite
+the Host header (and SNI) it sends to CloudFront, so CloudFront would see a request for
+its own domain rather than for `nodepulsecaringal.xyz`. That rewrite lives behind
+Cloudflare's Origin Rules "HostHeader override" capability, which turned out to be
+gated to paid plans. Applying it against this Free-tier zone failed with
+`not entitled to use the HostHeader override` — a straight entitlement error, not a
+token permission problem, and not fixable by changing what the token can do.
 
-The cost of that shortcut is `cloudflare.tf`. CloudFront routes purely on the Host
-header, and it doesn't know this domain, so a request arriving as
-`nodepulsecaringal.xyz` gets a 403 unless something rewrites it first. The origin
-rule in that file rewrites the Host header, and the TLS SNI, to CloudFront's own
-domain name before the request reaches it. The Cloudflare SSL mode is `full`, meaning
-Cloudflare encrypts that hop but does not check the certificate name — it can't,
-since CloudFront's certificate has no idea this domain exists.
+**What's here instead**, in `acm.tf`. CloudFront gets registered with
+`nodepulsecaringal.xyz` (and `www`) as an actual alias, backed by a real ACM
+certificate requested in `us-east-1` — CloudFront requires that region for any
+certificate regardless of where the distribution or bucket live. With the domain
+configured as a proper alias, Cloudflare's ordinary reverse-proxy behaviour — forwarding
+the request's real Host header and SNI unmodified — is already enough. No rewrite rule,
+no paid-plan feature.
+
+This does not change what a browser sees. The ACM certificate is presented only on the
+private hop between Cloudflare and CloudFront, which no visitor ever touches directly.
+It does mean the Cloudflare zone's SSL mode moved from `full` to `strict`, since
+CloudFront now answers with a certificate that genuinely covers the domain, so
+Cloudflare can verify it instead of merely encrypting blindly.
+
+The one real cost is the one this design set out to avoid: an ACM certificate to
+request, validate by DNS (`cloudflare_record.cert_validation` in `acm.tf` proves
+ownership), and implicitly renew for as long as this stack exists. ACM renews
+certificates it manages automatically as long as the validation records stay in place,
+so this is closer to a one-time setup cost than an ongoing one.
 
 ## What each file does
 
@@ -29,11 +46,12 @@ since CloudFront's certificate has no idea this domain exists.
 | --- | --- |
 | `versions.tf` | Provider version pins. AWS on v5, Cloudflare pinned to v4 — v5 renamed most resources. |
 | `variables.tf` | Every input, each with an explanation of what changing it does. |
-| `providers.tf` | AWS and Cloudflare provider blocks. |
+| `providers.tf` | AWS provider (plus a us-east-1 alias for the ACM certificate) and the Cloudflare provider. |
 | `locals.tf` | Bucket naming, the zone lookup, tags. |
 | `s3.tf` | Private bucket, no public access, versioned, SSE, a lifecycle rule to expire old versions. |
-| `cloudfront.tf` | The distribution: OAC to read S3, SPA fallback routing, security headers, default certificate. |
-| `cloudflare.tf` | DNS records, the origin host/SNI rewrite rule, the zone SSL mode. |
+| `acm.tf` | The certificate CloudFront needs to answer to this domain, and why it exists — see above. |
+| `cloudfront.tf` | The distribution: OAC to read S3, SPA fallback routing, security headers, the ACM certificate. |
+| `cloudflare.tf` | DNS records for the site, and the zone SSL mode. |
 | `iam.tf` | GitHub OIDC provider and a deploy role scoped to one repo and branch. |
 | `outputs.tf` | Values the GitHub Actions workflow needs as repository variables. |
 
@@ -45,11 +63,8 @@ cp terraform.tfvars.example terraform.tfvars
 # edit terraform.tfvars: only the defaults need changing if anything moved
 
 export TF_VAR_cloudflare_api_token="..."   # Zone.DNS edit, Zone.Zone Settings edit,
-                                            # Zone.Origin Rules edit, Zone.Zone read —
-                                            # scoped to the nodepulsecaringal.xyz zone only.
-                                            # Origin Rules, not Config Rules — that's a
-                                            # different ruleset product and won't
-                                            # authorize cloudflare_ruleset.origin_host_rewrite
+                                            # Zone.Zone read — scoped to the
+                                            # nodepulsecaringal.xyz zone only
 
 terraform init
 terraform plan
@@ -58,6 +73,11 @@ terraform apply
 
 AWS credentials come from whatever the AWS CLI already resolves locally (a profile,
 `AWS_PROFILE`, or `aws sso login`) — nothing AWS-specific needs exporting beyond that.
+
+The first `apply` takes longer than a typical Terraform run, usually a few minutes.
+It has to wait on `aws_acm_certificate_validation.site`, which polls until Cloudflare's
+DNS validation record has propagated and ACM has actually verified it — this is normal,
+not a hang.
 
 After `apply`, wire the outputs into the repository so `frontend-deploy.yml` can use them:
 

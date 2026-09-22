@@ -14,8 +14,13 @@ output "cloudfront_distribution_id" {
 }
 
 output "cloudfront_domain_name" {
-  description = "CloudFront's own hostname. Cloudflare's origin rule rewrites the Host header and SNI to this value on the origin leg."
+  description = "CloudFront's own hostname. Not needed by Cloudflare for routing since the distribution answers to the real domain directly — kept for reference and debugging."
   value       = aws_cloudfront_distribution.site.domain_name
+}
+
+output "acm_certificate_arn" {
+  description = "The us-east-1 certificate CloudFront presents on the Cloudflare-to-CloudFront hop. Never seen by a browser."
+  value       = aws_acm_certificate_validation.site.certificate_arn
 }
 
 output "github_deploy_role_arn" {

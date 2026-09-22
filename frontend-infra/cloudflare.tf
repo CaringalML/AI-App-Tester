@@ -1,13 +1,12 @@
 # This file is what makes "Cloudflare HTTPS, not CloudFront HTTPS" true.
 #
-# The browser only ever sees a Cloudflare certificate for nodepulsecaringal.xyz.
-# Cloudflare then opens its own HTTPS connection to CloudFront's default
-# *.cloudfront.net certificate, which is why the CloudFront viewer_certificate
-# block in cloudfront.tf stays on cloudfront_default_certificate rather than an
-# ACM cert for this domain.
+# The browser only ever sees a Cloudflare certificate for nodepulsecaringal.xyz,
+# because these records stay proxied (orange-clouded) rather than DNS-only.
+# CloudFront also holds a certificate for this domain now (see acm.tf), but
+# that one is presented only on the private Cloudflare-to-CloudFront hop —
+# no visitor's browser ever negotiates TLS with CloudFront directly.
 
-# DNS records for the site itself. Proxied (orange-clouded), so Cloudflare
-# terminates TLS at its edge instead of passing the connection straight through.
+# DNS records for the site itself.
 resource "cloudflare_record" "root" {
   zone_id = data.cloudflare_zone.this.id
   name    = "@"
@@ -28,41 +27,15 @@ resource "cloudflare_record" "www" {
   ttl     = 1
 }
 
-# Rewrites what Cloudflare sends to CloudFront on the origin leg, so a request
-# that arrived as https://nodepulsecaringal.xyz reaches CloudFront looking like
-# a request for its own domain. Without this CloudFront returns 403, because it
-# routes purely on the Host header and this domain is not one of its aliases.
-resource "cloudflare_ruleset" "origin_host_rewrite" {
-  zone_id = data.cloudflare_zone.this.id
-  name    = "${var.project_name}-origin-rewrite"
-  kind    = "zone"
-  phase   = "http_request_origin"
+# No origin rule needed to make CloudFront accept the request: it now
+# recognizes nodepulsecaringal.xyz directly as a configured alias with a
+# matching certificate (acm.tf), so Cloudflare's ordinary reverse-proxy
+# behaviour — forwarding the request's real Host header and SNI unmodified —
+# already works. That is a direct consequence of the HostHeader override
+# entitlement failure above; see acm.tf for the full explanation.
 
-  rules {
-    description = "Present CloudFront's own hostname on the origin connection"
-    expression  = "true"
-    action      = "route"
-
-    action_parameters {
-      host_header = aws_cloudfront_distribution.site.domain_name
-
-      origin {
-        host = aws_cloudfront_distribution.site.domain_name
-      }
-
-      dynamic "sni" {
-        for_each = var.override_origin_sni ? [1] : []
-        content {
-          value = aws_cloudfront_distribution.site.domain_name
-        }
-      }
-    }
-  }
-}
-
-# full: Cloudflare encrypts the hop to CloudFront but does not check that the
-# certificate name matches nodepulsecaringal.xyz, which it never will, since
-# CloudFront answers on its own shared certificate. strict would fail closed.
+# strict: CloudFront now answers with a certificate that genuinely covers this
+# domain, so Cloudflare can verify it instead of merely encrypting blindly.
 resource "cloudflare_zone_settings_override" "this" {
   zone_id = data.cloudflare_zone.this.id
 

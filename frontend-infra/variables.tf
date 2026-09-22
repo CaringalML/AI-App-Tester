@@ -24,11 +24,11 @@ variable "create_www" {
 
 variable "cloudflare_api_token" {
   description = <<-EOT
-    Cloudflare API token. Needs Zone.DNS edit, Zone.Zone Settings edit,
-    Zone.Origin Rules edit and Zone.Zone read, scoped to this one zone.
-    Origin Rules, not Config Rules — Config Rules is a different ruleset
-    product (http_config_settings) and will not authorize the
-    http_request_origin ruleset this stack creates.
+    Cloudflare API token. Needs Zone.DNS edit, Zone.Zone Settings edit and
+    Zone.Zone read, scoped to this one zone. Earlier versions of this stack
+    also needed Zone.Origin Rules edit for a Host header rewrite; that rule
+    is gone now (see acm.tf) because Origin Rules' HostHeader override is a
+    paid-plan feature and this zone is on Free.
     Supply it with TF_VAR_cloudflare_api_token rather than a tfvars file.
   EOT
   type        = string
@@ -71,25 +71,16 @@ variable "cloudfront_price_class" {
   }
 }
 
-variable "override_origin_sni" {
-  description = <<-EOT
-    Also rewrite the TLS SNI that Cloudflare sends to CloudFront, not just the
-    Host header. Leave this on where the plan supports it. If an apply fails
-    saying the sni field is unavailable, set it to false and keep the Cloudflare
-    SSL mode at full rather than full (strict), which is what ssl_mode does.
-  EOT
-  type        = bool
-  default     = true
-}
-
 variable "cloudflare_ssl_mode" {
   description = <<-EOT
-    How Cloudflare talks to CloudFront. full encrypts but does not verify the
-    certificate name, which is required here because CloudFront answers with its
-    own *.cloudfront.net certificate and knows nothing about this domain.
+    How Cloudflare talks to CloudFront. strict verifies that the origin's
+    certificate covers this domain, which it does now that CloudFront holds an
+    ACM certificate for it (acm.tf). Only fall back to full if the certificate
+    is ever removed and CloudFront goes back to answering on its own
+    *.cloudfront.net certificate.
   EOT
   type        = string
-  default     = "full"
+  default     = "strict"
 
   validation {
     condition     = contains(["full", "strict"], var.cloudflare_ssl_mode)
