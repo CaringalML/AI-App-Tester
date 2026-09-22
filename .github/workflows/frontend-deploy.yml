@@ -1,0 +1,86 @@
+name: Deploy frontend
+
+# Path filters keep an infra-only or docs-only commit from triggering a build.
+# frontend-infra changes are applied by hand with terraform apply, not here,
+# because letting CI run terraform apply against AWS needs its own review step
+# that is out of scope for this prototype.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - '.github/workflows/frontend-deploy.yml'
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # required to mint the OIDC token that assumes AWS_DEPLOY_ROLE_ARN
+  contents: read
+
+concurrency:
+  group: frontend-deploy
+  cancel-in-progress: false # let an in-flight deploy finish rather than ship a half-synced bucket
+
+env:
+  AWS_REGION: ap-southeast-2
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check and build
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Two-pass sync so index.html never gets served from a stale edge cache
+      # after a deploy. Hashed asset filenames (Vite's default) make it safe to
+      # cache those forever, since a new build gets new filenames automatically.
+      - name: Sync hashed assets with long cache
+        run: |
+          aws s3 sync dist/ "s3://${{ vars.S3_BUCKET_NAME }}" \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+
+      - name: Upload index.html with no-cache
+        run: |
+          aws s3 cp dist/index.html "s3://${{ vars.S3_BUCKET_NAME }}/index.html" \
+            --cache-control "public,max-age=0,must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/*"
+
+      - name: Summary
+        run: |
+          echo "### Deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Bucket: \`${{ vars.S3_BUCKET_NAME }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Distribution: \`${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Live at: https://nodepulsecaringal.xyz" >> "$GITHUB_STEP_SUMMARY"
