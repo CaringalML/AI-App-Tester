@@ -11,8 +11,10 @@ locals {
 
   site_hostnames = var.create_www ? [var.domain_name, "www.${var.domain_name}"] : [var.domain_name]
 
-  # Restricts which GitHub ref may assume the deploy role.
-  github_sub = var.github_deploy_branch == "*" ? "repo:${var.github_repo}:*" : "repo:${var.github_repo}:ref:refs/heads/${var.github_deploy_branch}"
+  # Matches the OIDC subject GitHub issues for a job that declares
+  # `environment: <name>` — see github_environment in variables.tf for why
+  # this isn't ref/branch-based.
+  github_sub = "repo:${var.github_repo}:environment:${var.github_environment}"
 
   tags = {
     Project   = var.project_name

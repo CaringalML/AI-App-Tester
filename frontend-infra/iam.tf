@@ -37,10 +37,11 @@ data "aws_iam_policy_document" "github_trust" {
       values   = ["sts.amazonaws.com"]
     }
 
-    # Scopes assumption to one repo and one branch. See github_deploy_branch
-    # in variables.tf; the wildcard escape hatch is documented there.
+    # Scopes assumption to one repo and one GitHub environment. See
+    # github_environment in variables.tf for why this is environment-based
+    # rather than branch-based.
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values   = [local.github_sub]
     }

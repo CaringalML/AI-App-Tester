@@ -41,10 +41,19 @@ variable "github_repo" {
   default     = "CaringalML/AI-App-Tester"
 }
 
-variable "github_deploy_branch" {
-  description = "Only this branch may assume the deploy role. Use * to allow any ref."
+variable "github_environment" {
+  description = <<-EOT
+    Must match the `environment:` key on the deploy job in
+    frontend-deploy.yml. Once a job declares an environment, GitHub's OIDC
+    token subject switches entirely to repo:<org>/<repo>:environment:<name>
+    and drops the branch-based form — the branch that triggered the run no
+    longer appears in the subject at all. Branch restriction instead comes
+    from the workflow's own `on.push.branches` filter, and optionally from
+    required reviewers or deployment branch rules on the GitHub environment
+    itself (Settings → Environments), not from this trust policy.
+  EOT
   type        = string
-  default     = "main"
+  default     = "production"
 }
 
 variable "create_github_oidc_provider" {
