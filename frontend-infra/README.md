@@ -45,8 +45,11 @@ cp terraform.tfvars.example terraform.tfvars
 # edit terraform.tfvars: only the defaults need changing if anything moved
 
 export TF_VAR_cloudflare_api_token="..."   # Zone.DNS edit, Zone.Zone Settings edit,
-                                            # Zone.Config Rules edit, Zone.Zone read —
-                                            # scoped to the nodepulsecaringal.xyz zone only
+                                            # Zone.Origin Rules edit, Zone.Zone read —
+                                            # scoped to the nodepulsecaringal.xyz zone only.
+                                            # Origin Rules, not Config Rules — that's a
+                                            # different ruleset product and won't
+                                            # authorize cloudflare_ruleset.origin_host_rewrite
 
 terraform init
 terraform plan

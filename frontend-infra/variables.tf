@@ -25,7 +25,10 @@ variable "create_www" {
 variable "cloudflare_api_token" {
   description = <<-EOT
     Cloudflare API token. Needs Zone.DNS edit, Zone.Zone Settings edit,
-    Zone.Config Rules edit and Zone.Zone read, scoped to this one zone.
+    Zone.Origin Rules edit and Zone.Zone read, scoped to this one zone.
+    Origin Rules, not Config Rules — Config Rules is a different ruleset
+    product (http_config_settings) and will not authorize the
+    http_request_origin ruleset this stack creates.
     Supply it with TF_VAR_cloudflare_api_token rather than a tfvars file.
   EOT
   type        = string
