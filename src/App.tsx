@@ -336,20 +336,31 @@ export default function App() {
 
         <main className="relative mx-auto w-full max-w-205 flex-1 px-4 pt-6 pb-14 sm:px-6 sm:pt-9 sm:pb-16">
           <section className="mb-8 text-center">
-            <span className="mb-4 inline-block rounded-full border border-line-strong bg-surface px-2.5 py-1 text-[11.5px] font-medium tracking-[0.06em] text-muted uppercase">
-              Prototype
+            {/* The lineage, for anyone who knows the names; the headline is for everyone else. */}
+            <span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-surface px-3 py-1 text-[11.5px] font-medium tracking-[0.06em] text-muted uppercase">
+              Cypress
+              <span className="text-accent" aria-hidden="true">
+                ×
+              </span>
+              <span className="sr-only">plus</span>
+              Playwright
+              <span className="text-accent" aria-hidden="true">
+                ×
+              </span>
+              <span className="sr-only">plus</span>
+              Claude
             </span>
 
-            <h1 className="text-[clamp(2rem,5.2vw,3.1rem)] leading-[1.08] font-semibold tracking-[-0.035em]">
-              Point it at your app.
+            <h1 className="text-[clamp(2rem,5.2vw,3.1rem)] leading-[1.08] font-semibold tracking-[-0.035em] text-balance">
+              Tests your app like a person.
               <br />
-              It finds what is broken.
+              <span className="text-accent">Reports like an engineer.</span>
             </h1>
 
-            <p className="mx-auto mt-4 max-w-[54ch] text-[15.5px] text-muted">
-              No test cases to write, no scripts to maintain. Give it an address and it explores the
-              app the way a person would, then reports what failed and what could be better in plain
-              language.
+            <p className="mx-auto mt-4 max-w-[56ch] text-[15.5px] text-pretty text-muted">
+              Cypress&rsquo;s time-travel replay and Playwright&rsquo;s real browser, with Claude
+              deciding what to try. Paste an address, watch it explore, and get back what broke and
+              what could be better, every finding backed by evidence.
             </p>
           </section>
 

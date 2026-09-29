@@ -1,5 +1,7 @@
 # AI App Tester
 
+**Cypress × Playwright × Claude.** Tests your app like a person, reports like an engineer.
+
 Point it at a web app's address. A real browser gathers evidence, Claude explores the
 main flows and judges what it finds, and you get back a report a developer can act on:
 what is broken, what could be better, how to reproduce each one, and how sure the
