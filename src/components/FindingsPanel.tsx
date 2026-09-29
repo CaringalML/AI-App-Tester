@@ -140,7 +140,7 @@ export function FindingsPanel({
   }
 
   return (
-    <div className="grid gap-5">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
       {steps.length ? (
         <div ref={runnerRef} className="scroll-mt-6">
           <TestRunner
@@ -208,7 +208,7 @@ export function FindingsPanel({
           </div>
         ) : null}
 
-        <div className="grid gap-2.5 p-3.5">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5 p-3.5">
           {visible.length === 0 ? (
             <p className="p-6.5 text-center text-[13.5px] text-faint">Nothing in this category.</p>
           ) : (

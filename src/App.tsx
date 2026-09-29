@@ -17,6 +17,7 @@ import {
 import { loadHistory, saveHistory, type HistoryEntry } from './lib/history';
 
 const HISTORY_REFRESH_MS = 8000;
+const RAIL_KEY = 'ai-app-tester:sidebar';
 
 export default function App() {
   const [options, setOptions] = useState<ScanOptions>(DEFAULT_OPTIONS);
@@ -32,6 +33,40 @@ export default function App() {
   const [summaries, setSummaries] = useState<Record<string, ScanSummary>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(() => {
+    try {
+      return localStorage.getItem(RAIL_KEY) !== 'closed';
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(RAIL_KEY, railOpen ? 'open' : 'closed');
+    } catch {
+      // A preference, not a requirement.
+    }
+  }, [railOpen]);
+
+  // The drawer behaves like a dialog: Escape closes it and the page behind stops scrolling.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setDrawerOpen(false);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [drawerOpen]);
+
+  /** One History button for every screen: expands the rail on desktop, opens the drawer below. */
+  function showHistory() {
+    if (window.matchMedia('(min-width: 64rem)').matches) setRailOpen(true);
+    else setDrawerOpen(true);
+  }
 
   const resultsRef = useRef<HTMLElement>(null);
   // Only one scan is shown at a time; switching aborts polling of the previous one.
@@ -198,7 +233,7 @@ export default function App() {
     if (id === activeId) newTest();
   }
 
-  const sidebar = (onClose?: () => void) => (
+  const sidebar = (variant: 'rail' | 'drawer', onClose: () => void) => (
     <HistorySidebar
       entries={history}
       summaries={summaries}
@@ -207,6 +242,7 @@ export default function App() {
       onNewTest={newTest}
       onDelete={removeFromHistory}
       onClose={onClose}
+      variant={variant}
     />
   );
 
@@ -214,8 +250,16 @@ export default function App() {
     <div className="flex min-h-full">
       {isLiveApi ? (
         <>
-          {/* Desktop: a fixed rail. */}
-          <div className="sticky top-0 hidden h-screen w-72 flex-none lg:block">{sidebar()}</div>
+          {/* Desktop: a rail that slides closed. The inner panel keeps its width while the
+              outer one animates, so the list never reflows mid-animation. */}
+          <div
+            className={`sticky top-0 hidden h-screen flex-none overflow-hidden transition-[width] duration-200 ease-out lg:block ${
+              railOpen ? 'w-72' : 'w-0'
+            }`}
+            {...(railOpen ? {} : { inert: '', 'aria-hidden': true })}
+          >
+            <div className="h-full w-72">{sidebar('rail', () => setRailOpen(false))}</div>
+          </div>
 
           {/* Smaller screens: a drawer over the page. */}
           {drawerOpen ? (
@@ -227,26 +271,29 @@ export default function App() {
                 onClick={() => setDrawerOpen(false)}
               />
               <div className="relative h-full w-80 max-w-[85vw] animate-rise">
-                {sidebar(() => setDrawerOpen(false))}
+                {sidebar('drawer', () => setDrawerOpen(false))}
               </div>
             </div>
           ) : null}
         </>
       ) : null}
 
-      <div className="relative flex min-w-0 flex-1 flex-col overflow-x-hidden">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-x-clip">
         <div
           className="glow pointer-events-none absolute -top-80 left-1/2 h-160 w-225 -translate-x-1/2 blur-2xl"
           aria-hidden="true"
         />
 
-        <header className="relative mx-auto flex w-full max-w-270 items-center justify-between gap-4 px-6 py-5">
+        <header className="relative mx-auto flex w-full max-w-270 items-center justify-between gap-3 px-4 py-4 sm:px-6 sm:py-5">
           <div className="flex items-center gap-2.5">
             {isLiveApi ? (
               <button
                 type="button"
-                onClick={() => setDrawerOpen(true)}
-                className="flex items-center gap-1.5 rounded-[9px] border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-muted hover:text-ink lg:hidden"
+                onClick={showHistory}
+                aria-label="Show test history"
+                className={`flex items-center gap-1.5 rounded-[9px] border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-muted transition hover:text-ink ${
+                  railOpen ? 'lg:hidden' : ''
+                }`}
               >
                 <svg
                   className="size-4"
@@ -259,7 +306,12 @@ export default function App() {
                 >
                   <path d="M4 6h16M4 12h16M4 18h10" />
                 </svg>
-                History{history.length ? ` (${history.length})` : ''}
+                <span className="hidden sm:inline">History</span>
+                {history.length ? (
+                  <span className="rounded-full bg-raised px-1.5 font-mono text-[11px]">
+                    {history.length}
+                  </span>
+                ) : null}
               </button>
             ) : null}
             <span
@@ -271,7 +323,7 @@ export default function App() {
           <ThemeToggle />
         </header>
 
-        <main className="relative mx-auto w-full max-w-205 flex-1 px-6 pt-9 pb-16">
+        <main className="relative mx-auto w-full max-w-205 flex-1 px-4 pt-6 pb-14 sm:px-6 sm:pt-9 sm:pb-16">
           <section className="mb-8 text-center">
             <span className="mb-4 inline-block rounded-full border border-line-strong bg-surface px-2.5 py-1 text-[11.5px] font-medium tracking-[0.06em] text-muted uppercase">
               Prototype
@@ -302,7 +354,7 @@ export default function App() {
         {/* Wider than the form: the runner needs room for a log beside a real viewport. */}
         <section
           ref={resultsRef}
-          className="relative mx-auto -mt-8 w-full max-w-300 scroll-mt-4 px-6 pb-16"
+          className="@container relative mx-auto -mt-8 w-full max-w-300 scroll-mt-4 px-4 pb-16 sm:px-6"
         >
           <FindingsPanel
             key={activeId ?? 'none'}

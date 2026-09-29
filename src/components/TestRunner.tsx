@@ -155,9 +155,9 @@ export function TestRunner({
   const claudeTurn = live && idleSeconds > 2.5 && steps.some((s) => s.kind !== 'stage');
 
   return (
-    <div className="grid overflow-hidden rounded-[14px] border border-line bg-surface lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+    <div className="grid grid-cols-[minmax(0,1fr)] overflow-hidden rounded-[14px] border border-line bg-surface @4xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       {/* Command log */}
-      <section className="order-2 flex min-h-0 flex-col border-t border-line lg:order-1 lg:border-t-0 lg:border-r">
+      <section className="order-2 flex min-h-0 flex-col border-t border-line @4xl:order-1 @4xl:border-t-0 @4xl:border-r">
         <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div className="flex items-center gap-2">
             <h3 className="text-[13px] font-semibold tracking-tight">Command log</h3>
@@ -210,7 +210,7 @@ export function TestRunner({
 
         <ol
           ref={logRef}
-          className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1.5 lg:max-h-[34rem]"
+          className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1.5 @4xl:max-h-[34rem]"
           onMouseLeave={() => setHovered(null)}
         >
           {steps.map((s) => {
@@ -292,7 +292,7 @@ export function TestRunner({
       </section>
 
       {/* Browser viewport */}
-      <section className="order-1 flex min-w-0 flex-col lg:order-2">
+      <section className="order-1 flex min-w-0 flex-col @4xl:order-2">
         <div className="flex items-center gap-3 border-b border-line bg-raised px-3.5 py-2.5">
           <span className="flex gap-1.5" aria-hidden="true">
             <span className="size-2.5 rounded-full bg-line-strong" />
@@ -374,7 +374,7 @@ export function TestRunner({
               {live ? 'Back to live' : 'Show last step'}
             </button>
           ) : (
-            <span className="flex-none text-[11.5px] text-faint">
+            <span className="hidden flex-none text-[11.5px] text-faint sm:inline">
               {live
                 ? 'Following live · click a step to pin it'
                 : 'Hover or click a step to replay it'}

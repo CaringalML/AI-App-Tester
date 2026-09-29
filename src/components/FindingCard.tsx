@@ -45,7 +45,7 @@ export function FindingCard({
   const [open, setOpen] = useState(false);
 
   return (
-    <article className="overflow-hidden rounded-[11px] border border-line bg-raised transition-colors hover:border-line-strong">
+    <article className="min-w-0 overflow-hidden rounded-[11px] border border-line bg-raised transition-colors hover:border-line-strong">
       <button
         type="button"
         className="flex w-full items-start gap-3 p-4 text-left"
@@ -123,12 +123,12 @@ export function FindingCard({
       </button>
 
       {open ? (
-        <div className="grid animate-rise gap-4 border-t border-line px-4.5 pt-4 pb-4.5 pl-7.75">
+        <div className="grid animate-rise gap-4 [overflow-wrap:anywhere] border-t border-line px-4.5 pt-4 pb-4.5 pl-7.75">
           <section>
             <h4 className="mb-1.25 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
               What happened
             </h4>
-            <pre className="font-mono text-[12.5px] leading-relaxed break-words whitespace-pre-wrap text-muted">
+            <pre className="font-mono text-[12.5px] leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap text-muted">
               {finding.evidence}
             </pre>
           </section>

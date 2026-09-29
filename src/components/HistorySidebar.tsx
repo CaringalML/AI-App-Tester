@@ -10,8 +10,9 @@ interface Props {
   onOpen: (id: string) => void;
   onNewTest: () => void;
   onDelete: (id: string) => Promise<void>;
-  /** Closes the drawer on small screens; absent on the desktop rail. */
-  onClose?: () => void;
+  onClose: () => void;
+  /** rail: collapses the desktop sidebar. drawer: dismisses the overlay on small screens. */
+  variant: 'rail' | 'drawer';
 }
 
 function splitUrl(url: string): { host: string; path: string } {
@@ -41,6 +42,7 @@ export function HistorySidebar({
   onNewTest,
   onDelete,
   onClose,
+  variant,
 }: Props) {
   const [confirming, setConfirming] = useState<string | 'all' | null>(null);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
@@ -91,18 +93,24 @@ export function HistorySidebar({
             </svg>
             New
           </button>
-          {onClose ? (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close history"
-              className="grid size-7 place-items-center rounded-md text-muted hover:text-ink"
-            >
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={variant === 'rail' ? 'Hide history' : 'Close history'}
+            title={variant === 'rail' ? 'Hide history' : 'Close'}
+            className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-raised hover:text-ink"
+          >
+            {variant === 'rail' ? (
+              <svg className="size-4" {...ICON}>
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M9 4v16M15 10l-2 2 2 2" />
+              </svg>
+            ) : (
               <svg className="size-4" {...ICON}>
                 <path d="M6 6l12 12M18 6L6 18" />
               </svg>
-            </button>
-          ) : null}
+            )}
+          </button>
         </div>
       </header>
 
