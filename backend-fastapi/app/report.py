@@ -25,6 +25,20 @@ def _finding_md(finding: Finding) -> str:
         "",
         f"**Suggested fix:** {finding.suggestion}",
     ]
+    if finding.playwright_test:
+        verdict = {
+            "fails-now": "fails today, as it should",
+            "passes-now": "already passes, so it may not catch this",
+            "unverified": "not checked automatically",
+        }.get(finding.test_status or "unverified", "")
+        lines += [
+            "",
+            f"**Regression test** (Playwright, {verdict})",
+            "",
+            "```ts",
+            finding.playwright_test.rstrip(),
+            "```",
+        ]
     if finding.screenshot_url:
         lines += ["", f"[Screenshot at the time of the finding]({finding.screenshot_url})"]
     return "\n".join(lines)

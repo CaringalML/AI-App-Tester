@@ -37,7 +37,11 @@ export function checkUrl(raw: string): UrlCheck {
     parsed.hostname.endsWith('.local');
 
   if (!isLocal && !parsed.hostname.includes('.')) {
-    return { ok: false, message: 'That address is missing a domain, for example .com or .nz.', normalized };
+    return {
+      ok: false,
+      message: 'That address is missing a domain, for example .com or .nz.',
+      normalized,
+    };
   }
 
   return { ok: true, message: null, normalized };

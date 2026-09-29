@@ -22,6 +22,7 @@ from .artifacts import ArtifactStore, LocalArtifactStore, S3ArtifactStore
 from .config import Settings, get_settings
 from .models import Scan, ScanAccepted, ScanRequest, ScanSummary, utcnow
 from .report import render_markdown
+from .scanner.playwright_export import render_suite
 from .scanner.runner import ScanRunner
 from .security import RateLimiter, TargetGuard, TargetNotAllowedError
 from .store import DynamoScanStore, MemoryScanStore, ScanStore
@@ -256,6 +257,21 @@ def create_app(
     async def get_scan(scan_id: str, response: Response) -> Scan:
         response.headers["Cache-Control"] = "no-store"
         return await load(scan_id)
+
+    @app.get("/scans/{scan_id}/tests.spec.ts", response_class=PlainTextResponse, tags=["scans"])
+    async def get_tests(scan_id: str) -> PlainTextResponse:
+        """Every finding's Playwright regression test as one spec file."""
+        scan = await fetch(scan_id)
+        suite = render_suite(scan.findings)
+        if suite is None:
+            raise HTTPException(status_code=404, detail="This scan produced no tests.")
+        return PlainTextResponse(
+            suite,
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="ai-app-tester-{scan.id[:8]}.spec.ts"'
+            },
+        )
 
     @app.get("/scans/{scan_id}/report.md", response_class=PlainTextResponse, tags=["scans"])
     async def get_report(scan_id: str) -> PlainTextResponse:

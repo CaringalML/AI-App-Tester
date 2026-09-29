@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { Category, Finding, ScanPhase, ScanResult, TimelineStep } from '../lib/types';
 import { SEVERITY_ORDER } from '../lib/types';
-import { reportUrl } from '../lib/api';
+import { reportUrl, testsUrl } from '../lib/api';
 import { FindingCard } from './FindingCard';
 import { TestRunner } from './TestRunner';
 import { durationBetween, formatDuration, useElapsed } from '../lib/time';
@@ -204,7 +204,12 @@ export function FindingsPanel({
                 {note}
               </p>
             ))}
-            {result.id ? <ReportActions scanId={result.id} /> : null}
+            {result.id ? (
+              <ReportActions
+                scanId={result.id}
+                hasTests={result.findings.some((f) => f.playwrightTest)}
+              />
+            ) : null}
           </div>
         ) : null}
 
@@ -254,7 +259,7 @@ function runStats(result: ScanResult): string {
   return `${parts.join(' · ')} on ${result.targetUrl}`;
 }
 
-function ReportActions({ scanId }: { scanId: string }) {
+function ReportActions({ scanId, hasTests }: { scanId: string; hasTests: boolean }) {
   const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle');
 
   async function copyMarkdown() {
@@ -282,6 +287,11 @@ function ReportActions({ scanId }: { scanId: string }) {
       <a className={button} href={reportUrl(scanId)} target="_blank" rel="noreferrer">
         Open full report
       </a>
+      {hasTests ? (
+        <a className={button} href={testsUrl(scanId)} download>
+          Download Playwright tests
+        </a>
+      ) : null}
     </div>
   );
 }

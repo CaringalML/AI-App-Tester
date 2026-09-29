@@ -144,6 +144,10 @@ export async function deleteScan(id: string, ownerToken: string): Promise<void> 
   if (!response.ok && response.status !== 404) throw new ScanError(await readError(response));
 }
 
+export function testsUrl(scanId: string): string {
+  return `${API_URL}/scans/${scanId}/tests.spec.ts`;
+}
+
 export function reportUrl(scanId: string): string {
   return `${API_URL}/scans/${scanId}/report.md`;
 }

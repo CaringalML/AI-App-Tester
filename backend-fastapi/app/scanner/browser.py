@@ -128,6 +128,46 @@ class ActionOutcome:
         return f"{self.id}: {self.text}"
 
 
+# Locator candidates for an element, best first, in the order Playwright's docs
+# recommend. Checked for uniqueness in Python before one is used.
+_LOCATOR_CANDIDATES_JS = """
+(el) => {
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const tag = el.tagName.toLowerCase();
+  const type = (el.getAttribute('type') || '').toLowerCase();
+  let role = el.getAttribute('role');
+  if (!role) {
+    if (tag === 'button' || (tag === 'input' && ['submit', 'button', 'reset'].includes(type))) role = 'button';
+    else if (tag === 'a' && el.hasAttribute('href')) role = 'link';
+    else if (tag === 'input' && type === 'checkbox') role = 'checkbox';
+    else if (tag === 'input' && type === 'radio') role = 'radio';
+    else if (tag === 'select') role = 'combobox';
+    else if (tag === 'textarea' || (tag === 'input' && ['', 'text', 'email', 'search', 'tel', 'url', 'number'].includes(type))) role = 'textbox';
+  }
+  const labelEl = el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : el.closest('label');
+  const label = clean(el.getAttribute('aria-label') || (labelEl && labelEl.innerText));
+  const ownText = clean(el.innerText || el.value || el.getAttribute('title') || (el.querySelector('img[alt]') || {}).alt);
+  const name = clean(el.getAttribute('aria-label')) || (['button', 'link', 'tab', 'menuitem', 'checkbox', 'radio'].includes(role) ? ownText : '') || label;
+  const out = [];
+  const testid = el.getAttribute('data-testid');
+  if (testid) out.push({ kind: 'testid', value: testid });
+  for (const attr of ['data-test', 'data-cy']) {
+    const v = el.getAttribute(attr);
+    if (v) out.push({ kind: 'css', value: `[${attr}="${v.replace(/"/g, '\\\\"')}"]` });
+  }
+  if (role && name && name.length <= 80) out.push({ kind: 'role', role, name });
+  if (label && label.length <= 80) out.push({ kind: 'label', value: label });
+  const placeholder = el.getAttribute('placeholder');
+  if (placeholder) out.push({ kind: 'placeholder', value: placeholder });
+  if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) out.push({ kind: 'css', value: '#' + el.id });
+  const nameAttr = el.getAttribute('name');
+  if (nameAttr && /^[\w-]+$/.test(nameAttr)) out.push({ kind: 'css', value: `${tag}[name="${nameAttr}"]` });
+  if (ownText && ownText.length <= 60) out.push({ kind: 'text', value: ownText });
+  return out;
+}
+"""
+
+
 def site_key(url: str) -> str:
     host = (urlsplit(url).hostname or "").lower()
     return host.removeprefix("www.")
@@ -378,6 +418,146 @@ class BrowserSession:
     async def snapshot(self) -> dict:
         assert self.page is not None
         return await self.page.evaluate(_SNAPSHOT_JS)
+
+    # ---- locators for exported tests -------------------------------------------
+
+    async def stable_locator(self, ref: str) -> dict | None:
+        """The locator a developer would write for this element, proven unique.
+
+        Candidates are ordered the way Playwright's own guidance ranks them (test
+        id, role and accessible name, label, placeholder, then CSS and text). Each
+        one is checked with Playwright on the live page, and the first that
+        matches exactly one element wins. Our internal data-aat-ref is never used,
+        since it only exists while the scanner is attached.
+        """
+        try:
+            handle = await self._locator(ref).element_handle(timeout=2_000)
+            if handle is None:
+                return None
+            candidates = await handle.evaluate(_LOCATOR_CANDIDATES_JS)
+        except (PlaywrightError, ValueError):
+            return None
+        for candidate in candidates or []:
+            variants = [candidate]
+            if candidate.get("kind") == "role":
+                # Icon fonts put private-use glyphs into the accessible name (" Login"
+                # becomes " Login"), which defeats an exact match. Playwright's
+                # non-exact match accepts a substring, and is still proven unique below.
+                variants.append({**candidate, "exact": False})
+            for variant in variants:
+                locator = self.locator_for(variant)
+                if locator is None:
+                    continue
+                try:
+                    if await locator.count() == 1:
+                        return variant
+                except PlaywrightError:
+                    continue
+        return None
+
+    def locator_for(self, desc: dict, page: Page | None = None):  # noqa: ANN201 - Locator
+        """The Python twin of playwright_export.render_locator, for checking."""
+        page = page or self.page
+        assert page is not None
+        match desc.get("kind"):
+            case "role":
+                return page.get_by_role(
+                    desc["role"], name=desc["name"], exact=desc.get("exact", True)
+                )
+            case "label":
+                return page.get_by_label(desc["value"], exact=True)
+            case "placeholder":
+                return page.get_by_placeholder(desc["value"], exact=True)
+            case "testid":
+                return page.get_by_test_id(desc["value"])
+            case "text":
+                return page.get_by_text(desc["value"], exact=True)
+            case "css":
+                return page.locator(desc["value"])
+        return None
+
+    async def expectation_holds(
+        self, kind: str, text: str, desc: dict | None, page: Page | None = None
+    ) -> bool | None:
+        """Whether an expectation is already true on the page right now.
+
+        None when it cannot be checked. For a regression test, "already true"
+        means the test would pass today and so may not catch the issue.
+        """
+        page = page or self.page
+        assert page is not None
+        text = text.strip()
+        try:
+            match kind:
+                case "text_visible" if text:
+                    return await page.get_by_text(text).first.is_visible()
+                case "text_not_visible" if text:
+                    return await page.get_by_text(text).count() == 0
+                case "url_contains" if text:
+                    return text in page.url
+                case "url_not_contains" if text:
+                    return text not in page.url
+                case "element_visible" if desc:
+                    return await self.locator_for(desc, page).is_visible()
+                case "element_hidden" if desc:
+                    return not await self.locator_for(desc, page).is_visible()
+                case "element_text" if desc and text:
+                    return text in (await self.locator_for(desc, page).inner_text(timeout=2_000))
+        except PlaywrightError:
+            return None
+        return None
+
+    async def replay_holds(
+        self, start_url: str, actions: list, kind: str, text: str, desc: dict | None
+    ) -> tuple[bool | None, str]:
+        """Run a test's recorded steps in a fresh browser context, then check its assertion.
+
+        This is what the Playwright runner will do with the exported file, done
+        server-side before export: same steps, same locators, clean state. What
+        runs is the recorded actions through this code, never model-written code.
+        Returns (holds, reason); holds is None when the replay could not finish.
+        """
+        assert self._browser is not None
+        context = await self._browser.new_context(viewport=VIEWPORT, locale="en-NZ")
+        errors: list[str] = []
+        try:
+            # The SSRF guard applies to replays exactly as it does to the scan.
+            await context.route("**/*", self._guard_route)
+            page = await context.new_page()
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.on("console", lambda m: m.type == "error" and errors.append(m.text))
+            page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+            await page.goto(start_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+            for action in actions:
+                locator = self.locator_for(action.locator, page) if action.locator else None
+                match action.kind:
+                    case "goto":
+                        await page.goto(
+                            action.value, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
+                        )
+                    case "back":
+                        await page.go_back(wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+                    case "press":
+                        await page.keyboard.press(action.value)
+                    case "click" if locator is not None:
+                        await locator.click(timeout=ACTION_TIMEOUT_MS)
+                    case "fill" if locator is not None:
+                        await locator.fill(action.value, timeout=ACTION_TIMEOUT_MS)
+                    case "select" if locator is not None:
+                        await locator.select_option(action.value, timeout=ACTION_TIMEOUT_MS)
+                    case _:
+                        return None, f"step {action.act_id} has no unique locator"
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=3_000)
+                except PlaywrightTimeout:
+                    pass
+            if kind == "no_console_errors":
+                return not errors, ""
+            return await self.expectation_holds(kind, text, desc, page), ""
+        except PlaywrightError as exc:
+            return None, str(exc).splitlines()[0][:160]
+        finally:
+            await context.close()
 
     # ---- agent actions ---------------------------------------------------------
 

@@ -39,6 +39,7 @@ Split exploration from judgement, and make every claim point at evidence:
 
 - **The browser records facts.** Crashes, console errors, failed requests, accessibility violations and broken links are captured by Playwright and reported without AI. They cannot be hallucinated.
 - **Claude explores and interprets.** It decides which flows to try, uses realistic bad input, and reports what it finds, but every finding must cite the ids of the browser events that show it. Uncited findings are kept, visibly downgraded.
+- **Bugs become regression tests.** Each bug Claude reproduces exports as a Playwright test assembled from the recorded run: real locators (checked to match exactly one element) and an assertion built from a structured expectation, never model-written code. Before export the server replays the steps in a fresh browser; a test is only marked "fails today, as it should" if its assertion really fails there.
 - **A second Claude pass reviews.** It merges duplicates and drops noise. The limits are enforced in code: it cannot invent findings, drop what the browser recorded, or promote an uncited claim. Everything it filters is still shown, with the reason.
 
 ## Repository

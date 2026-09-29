@@ -60,6 +60,9 @@ async def test_reporter_stores_frames_and_persists_each_step() -> None:
 class _Session:
     page = SimpleNamespace(url="https://app.example/signup")
 
+    async def stable_locator(self, ref: str) -> dict:
+        return {"kind": "role", "role": "button", "name": "Create account"}
+
     async def target_box(self, ref: str) -> dict[str, float]:
         return {"x": 0.5, "y": 0.5, "w": 0.1, "h": 0.1}
 
@@ -106,6 +109,10 @@ async def test_click_is_recorded_with_before_after_frames_and_the_reason() -> No
     assert fields["before"] == b"frame" and fields["shot"] == b"frame"
     assert fields["box"] == {"x": 0.5, "y": 0.5, "w": 0.1, "h": 0.1}
     assert fields["signals"] == 2
+    assert fields["code"] == (
+        'await page.getByRole("button", { name: "Create account", exact: true }).click();'
+    )
+    assert agent.test_actions[0].act_id == "act-3"
 
 
 def test_every_action_tool_requires_a_reason() -> None:

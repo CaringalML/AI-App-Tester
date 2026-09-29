@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Finding, Severity } from '../lib/types';
+import { RegressionTest } from './RegressionTest';
 
 const CONFIDENCE_NOTE: Record<Finding['confidence'], string> = {
   high: 'Reproduced directly. Treat as real.',
@@ -132,6 +133,8 @@ export function FindingCard({
               {finding.evidence}
             </pre>
           </section>
+
+          <RegressionTest finding={finding} />
 
           {finding.screenshotUrl ? (
             <section>

@@ -50,6 +50,10 @@ export interface Finding {
   suggestion: string;
   evidenceIds?: string[];
   screenshotUrl?: string | null;
+  /** Playwright regression test assembled from the recorded run. */
+  playwrightTest?: string | null;
+  testStatus?: 'fails-now' | 'passes-now' | 'unverified' | null;
+  testNote?: string | null;
 }
 
 export interface SuppressedFinding {
@@ -96,6 +100,8 @@ export interface TimelineStep {
   screenshotUrl?: string | null;
   /** The page just before an element action, which is where `box` applies. */
   beforeUrl?: string | null;
+  /** The Playwright line for this step, e.g. a getByRole(...).click(). */
+  code?: string | null;
 }
 
 export interface Usage {

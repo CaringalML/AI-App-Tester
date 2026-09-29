@@ -69,6 +69,15 @@ class Finding(ApiModel):
     evidence_ids: list[str] = Field(default_factory=list)
     screenshot_key: str | None = None
     screenshot_url: str | None = None
+    # A Playwright regression test for this finding, assembled from the recorded
+    # run (see scanner/playwright_export.py). It asserts the fixed behaviour.
+    playwright_test: str | None = None
+    # fails-now: checked against the page when reported, and the assertion fails
+    # there, so the test catches the issue. passes-now: the assertion already
+    # holds, so the test may not catch it. unverified: could not be checked.
+    test_status: Literal["fails-now", "passes-now", "unverified"] | None = None
+    test_note: str | None = None
+    test_body: list[str] = Field(default_factory=list)
 
 
 class SuppressedFinding(ApiModel):
@@ -124,6 +133,8 @@ class TimelineStep(ApiModel):
     before_key: str | None = None
     screenshot_url: str | None = None
     before_url: str | None = None
+    # The Playwright line this step would be in a test, e.g. a getByRole click.
+    code: str | None = None
 
 
 class Usage(ApiModel):

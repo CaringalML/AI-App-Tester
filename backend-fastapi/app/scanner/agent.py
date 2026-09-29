@@ -25,6 +25,13 @@ from ..config import Settings
 from .browser import ActionOutcome, BrowserSession
 from .findings import FindingCollector
 from .observations import ObservationLog
+from .playwright_export import (
+    EXPECTATION_TYPES,
+    Expectation,
+    TestAction,
+    build_test,
+    select_segment,
+)
 from .prompts import AGENT_SYSTEM
 from .usage import UsageTracker
 
@@ -147,6 +154,25 @@ TOOLS: list[dict[str, Any]] = [
                 "steps": {"type": "array", "items": {"type": "string"}},
                 "suggestion": {"type": "string", "description": "Concrete fix."},
                 "evidence_ids": {"type": "array", "items": {"type": "string"}},
+                "expectation": {
+                    "type": "object",
+                    "description": "What a user should observe once this is fixed, as one "
+                    "checkable fact. It becomes the assertion of an exported Playwright "
+                    "regression test, which must fail today and pass after the fix. Use "
+                    "text for the text/url types, ref (from get_page_state) for element "
+                    "types, and type none if no single check can express it.",
+                    "properties": {
+                        "type": {"type": "string", "enum": EXPECTATION_TYPES},
+                        "text": {"type": "string"},
+                        "ref": {"type": "string"},
+                        "description": {
+                            "type": "string",
+                            "description": "The expected behaviour in one plain sentence.",
+                        },
+                    },
+                    "required": ["type", "text", "ref", "description"],
+                    "additionalProperties": False,
+                },
             }
         ),
     },
@@ -213,6 +239,8 @@ class ExplorationAgent:
         self.steps = 0
         self.summary: str | None = None
         self.notes: list[str] = []
+        # Replayable record of every browser action, for exported Playwright tests.
+        self.test_actions: list[TestAction] = []
 
     async def run(self, automated_brief: str) -> None:
         state = await self.session.snapshot()
@@ -296,13 +324,30 @@ class ExplorationAgent:
         why: str,
         run: Callable[[], Awaitable[ActionOutcome]],
         ref: str | None = None,
+        *,
+        test_kind: str,
+        value: str = "",
     ) -> str:
         """Run one browser action and record it with before/after frames for the replay."""
-        box, before = None, None
+        box, before, locator = None, None, None
+        url_before = self.session.page.url
         if ref is not None:
+            # Measured before acting: after a click the element may be gone.
+            locator = await self.session.stable_locator(ref)
             box = await self.session.target_box(ref)
             before = await self._frame()
         outcome = await run()
+        action = TestAction(
+            act_id=outcome.id,
+            kind=test_kind,
+            url_before=url_before,
+            url_after=outcome.url,
+            label=label,
+            value=outcome.url if test_kind == "goto" else value,
+            locator=locator,
+        )
+        if not outcome.failed:
+            self.test_actions.append(action)
         await self.recorder.step(
             kind,
             label,
@@ -314,6 +359,7 @@ class ExplorationAgent:
             status="failed" if outcome.failed else "ok",
             action_id=outcome.id,
             signals=outcome.signals,
+            code=action.code(),
         )
         return outcome.for_model()
 
@@ -338,7 +384,12 @@ class ExplorationAgent:
                     ref = args["ref"]
                     label = self._label(ref)
                     result = await self._act(
-                        "click", f"“{label}”", why, lambda: session.click(ref, label), ref
+                        "click",
+                        f"“{label}”",
+                        why,
+                        lambda: session.click(ref, label),
+                        ref,
+                        test_kind="click",
                     )
                     return result, False, False
                 case "fill":
@@ -350,6 +401,8 @@ class ExplorationAgent:
                         why,
                         lambda: session.fill(ref, label, text),
                         ref,
+                        test_kind="fill",
+                        value=text,
                     )
                     return result, False, False
                 case "select_option":
@@ -361,20 +414,25 @@ class ExplorationAgent:
                         why,
                         lambda: session.select(ref, label, option),
                         ref,
+                        test_kind="select",
+                        value=option,
                     )
                     return result, False, False
                 case "press_key":
                     key = args["key"]
-                    result = await self._act("press", key, why, lambda: session.press(key))
+                    result = await self._act(
+                        "press", key, why, lambda: session.press(key), test_kind="press", value=key
+                    )
                     return result, False, False
                 case "navigate":
                     target = args["target"]
                     result = await self._act(
-                        "navigate", target, why, lambda: session.navigate(target)
+                        "navigate", target, why, lambda: session.navigate(target), test_kind="goto"
                     )
                     return result, False, False
                 case "go_back":
-                    return await self._act("back", "Back", why, session.back), False, False
+                    result = await self._act("back", "Back", why, session.back, test_kind="back")
+                    return result, False, False
                 case "take_screenshot":
                     image = await session.screenshot()
                     await self.recorder.step(
@@ -454,6 +512,8 @@ class ExplorationAgent:
         except Exception as exc:  # evidence image is a bonus, not a requirement
             log.warning("screenshot for %s failed: %s", finding.id, exc)
 
+        test_line = await self._attach_test(finding, args.get("expectation") or {}, valid)
+
         await self.recorder.step(
             "finding",
             finding.title,
@@ -463,9 +523,88 @@ class ExplorationAgent:
             shot_key=finding.screenshot_key,
         )
         reply = f"Recorded {finding.id} with evidence {', '.join(valid) or 'none'}."
+        reply += test_line
         if invalid:
             reply += f" Ignored unknown ids: {', '.join(invalid)}."
         return reply + note
+
+    async def _attach_test(self, finding: Any, raw: dict[str, Any], cited: list[str]) -> str:
+        """Build the finding's Playwright test and check it against the page now."""
+        session = self.session
+        kind = raw.get("type") or "none"
+        ref = (raw.get("ref") or "").strip()
+        locator = await session.stable_locator(ref) if ref and kind.startswith("element_") else None
+        expectation = Expectation(
+            type=kind,
+            text=raw.get("text") or "",
+            description=(raw.get("description") or "").strip(),
+            locator=locator,
+        )
+        segment = select_segment(self.test_actions, cited)
+        start_url = segment[0].url_before if segment else session.page.url
+
+        replayable = all(action.replayable for action in segment)
+        holds: bool | None = None
+        reason = ""
+        if expectation.checkable and replayable:
+            holds, reason = await session.replay_holds(
+                start_url, segment, kind, expectation.text, locator
+            )
+
+        if not expectation.checkable:
+            status, note = (
+                "unverified",
+                (
+                    "No single check could express the fix, so the test replays the steps and "
+                    "leaves the assertion as a TODO."
+                ),
+            )
+        elif not replayable:
+            status, note = (
+                "unverified",
+                ("Some steps had no unique locator; they are left as TODO comments."),
+            )
+        elif holds is None:
+            status = "unverified"
+            note = "The steps could not be replayed to check the assertion"
+            note += f" ({reason})." if reason else "."
+        elif holds:
+            status, note = (
+                "passes-now",
+                (
+                    "Replayed in a fresh browser before export: the assertion already holds, so "
+                    "this test may not catch the issue. Review the expectation."
+                ),
+            )
+        else:
+            status, note = (
+                "fails-now",
+                (
+                    "Replayed in a fresh browser before export: the assertion fails today, so the "
+                    "test catches the issue and should pass once it is fixed."
+                ),
+            )
+
+        test = build_test(
+            title=finding.title,
+            start_url=start_url,
+            actions=segment,
+            expectation=expectation,
+            status=status,
+            note=note,
+        )
+        finding.playwright_test = test.code
+        finding.test_status = test.status
+        finding.test_note = test.note
+        finding.test_body = test.body
+        return {
+            "fails-now": " Exported a Playwright test; replayed in a fresh browser, its assertion "
+            "fails today, as a regression test should.",
+            "passes-now": " Exported a Playwright test, but its assertion already holds on the "
+            "page, so it may not catch this. The expectation should describe the fixed "
+            "behaviour, which the page does not show yet.",
+            "unverified": " Exported a Playwright test; it could not be checked automatically.",
+        }[test.status]
 
 
 def brief_automated(findings: list, limit: int = 25) -> str:

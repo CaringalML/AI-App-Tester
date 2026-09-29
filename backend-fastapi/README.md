@@ -24,6 +24,31 @@ This is the part of the brief the design is built around.
 4. **Nothing disappears silently.** Everything filtered out is returned under `suppressed` with the reason, so a developer can see what was removed and overrule it.
 5. **Page text is data.** The system prompt treats site content as untrusted, so a page cannot talk the agent into leaving its task.
 
+## Findings export as Playwright tests
+
+A finding is only useful until it is fixed; a test keeps it fixed. `scanner/playwright_export.py`
+turns each finding into a `@playwright/test` spec:
+
+- **Steps** are the browser actions the scan recorded. For each element Claude touched, the
+  scanner computes candidate locators in Playwright's recommended order (test id, role and
+  accessible name, label, placeholder, then CSS and text) and keeps the first that Playwright
+  confirms matches exactly one element. Icon fonts in accessible names fall back to a non-exact
+  role match, still proven unique. A step with no unique locator becomes a TODO, never a guess.
+- **The assertion** comes from a structured `expectation` on `report_finding`: one checkable fact
+  from a fixed set (text visible or absent, URL, element state or text, no console errors). The
+  server renders it; model output only ever lands inside escaped string literals, so page content
+  cannot prompt-inject executable code into the file.
+- **Replay before export.** The test's own steps are replayed in a fresh, isolated browser
+  context (SSRF guard included), and the assertion is checked there. `fails-now` means the test
+  catches the issue; `passes-now` flags one that may not; `unverified` is never presented as
+  proven.
+- **Which steps.** From the first cited action, walking back over the fields filled just before
+  it, to the last cited action. Earlier or later attempts are separate experiments.
+
+`GET /scans/{id}/tests.spec.ts` downloads every test as one suite. Verified end to end by running
+a downloaded suite with the real Playwright runner: each test executed its steps and failed at
+exactly the assertion the server predicted.
+
 ## Running locally
 
 ```bash
@@ -48,6 +73,7 @@ rejects every request until you also set `ANTHROPIC_WORKSPACE_ID`.
 | --- | --- | --- |
 | `POST` | `/scans` | Start a scan. Body: `{"url": "...", "options": {"maxPages": 5}}`. Returns `202` with an id |
 | `GET` | `/scans/{id}` | Poll status, live progress, findings, usage and cost |
+| `GET` | `/scans/{id}/tests.spec.ts` | Every finding's Playwright regression test as one downloadable suite |
 | `GET` | `/scans/{id}/report.md` | The finished report as Markdown, ready to paste into an issue |
 | `GET` | `/scans?ids=a,b,c` | Summaries for the history sidebar (up to 30 ids). Unknown or expired ids are left out |
 | `DELETE` | `/scans/{id}` | Delete the record and every stored screenshot. Needs the `X-Owner-Token` returned when the scan started |

@@ -38,6 +38,7 @@ from .agent import ExplorationAgent, brief_automated
 from .browser import BrowserSession, page_key
 from .findings import FindingCollector, build_automated_findings
 from .observations import ObservationLog
+from .playwright_export import attach_automated_tests
 from .reviewer import review_findings
 from .usage import UsageTracker
 
@@ -93,6 +94,7 @@ class Reporter:
         finding_id: str | None = None,
         signals: int = 0,
         shot_key: str | None = None,
+        code: str | None = None,
     ) -> None:
         index = len(self.scan.timeline) + 1
         self.scan.timeline.append(
@@ -107,6 +109,7 @@ class Reporter:
                 action_id=action_id,
                 finding_id=finding_id,
                 signals=signals,
+                code=code,
                 box=box,
                 screenshot_key=shot_key or await self._store_image(f"{index:03d}", shot),
                 before_key=await self._store_image(f"{index:03d}-before", before),
@@ -275,6 +278,7 @@ class ScanRunner:
                 await session.check_links(settings.max_link_checks)
 
             build_automated_findings(observations, collector, options)
+            attach_automated_tests(collector.items, observations)
             count = len(collector.items)
             await reporter.progress(
                 f"Browser checks found {count} issue{'s' if count != 1 else ''}",

@@ -359,8 +359,8 @@ export default function App() {
 
             <p className="mx-auto mt-4 max-w-[56ch] text-[15.5px] text-pretty text-muted">
               Cypress&rsquo;s time-travel replay and Playwright&rsquo;s real browser, with Claude
-              deciding what to try. Paste an address, watch it explore, and get back what broke and
-              what could be better, every finding backed by evidence.
+              deciding what to try. Watch it explore, see exactly what it saw, and keep the bugs it
+              reproduces as Playwright tests.
             </p>
           </section>
 
@@ -393,8 +393,8 @@ export default function App() {
         <footer className="relative flex flex-wrap items-center justify-center gap-2.5 px-6 pt-4 pb-8 text-center text-[12.5px] text-faint">
           {isLiveApi ? (
             <span>
-              Evidence from a real Chromium browser. Judgement from Claude. Every finding cites what
-              the browser recorded.
+              Evidence from a real Chromium browser. Judgement from Claude. Findings without
+              evidence are marked, never hidden.
             </span>
           ) : (
             <>

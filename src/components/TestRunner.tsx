@@ -360,6 +360,14 @@ export function TestRunner({
             {step ? (
               <>
                 <span className="font-mono text-faint">#{step.index}</span> {step.why ?? step.label}
+                {step.code ? (
+                  <code
+                    className="mt-1 block truncate font-mono text-[11px] text-low"
+                    title={step.code}
+                  >
+                    {step.code}
+                  </code>
+                ) : null}
               </>
             ) : (
               'Waiting for the first step'
