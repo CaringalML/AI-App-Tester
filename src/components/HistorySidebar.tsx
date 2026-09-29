@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { HistoryEntry } from '../lib/history';
 import type { ScanSummary } from '../lib/types';
 import { durationBetween, formatAgo, formatDuration } from '../lib/time';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface Props {
   entries: HistoryEntry[];
@@ -51,36 +52,97 @@ export function HistorySidebar({
   mode,
   onToggle,
 }: Props) {
-  const [confirming, setConfirming] = useState<string | 'all' | null>(null);
-  const [deleting, setDeleting] = useState<Set<string>>(new Set());
-  const [failures, setFailures] = useState<Record<string, string>>({});
+  /** What the confirmation dialog is about to delete, if it is open. */
+  const [pending, setPending] = useState<{ ids: string[]; all: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const deletable = entries.filter((e) => {
     const status = summaries[e.id]?.status;
     return status === 'done' || status === 'error';
   });
 
-  async function remove(ids: string[]) {
-    setConfirming(null);
-    setDeleting((prev) => new Set([...prev, ...ids]));
-    // One at a time: a clear-all of a busy history should not burst the API.
-    for (const id of ids) {
+  function ask(ids: string[], all: boolean) {
+    setError(null);
+    setPending({ ids, all });
+  }
+
+  function cancel() {
+    if (busy) return;
+    setPending(null);
+    setError(null);
+  }
+
+  async function confirmDelete() {
+    if (!pending) return;
+    setBusy(true);
+    setError(null);
+    const failures: string[] = [];
+    // One at a time: clearing a long history should not burst the API.
+    for (const id of pending.ids) {
       try {
         await onDelete(id);
-        setFailures(({ [id]: _, ...rest }) => rest);
       } catch (cause) {
-        setFailures((prev) => ({
-          ...prev,
-          [id]: cause instanceof Error ? cause.message : 'Could not delete.',
-        }));
+        failures.push(cause instanceof Error ? cause.message : 'Could not delete.');
       }
-      setDeleting((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
     }
+    setBusy(false);
+    if (!failures.length) {
+      setPending(null);
+      return;
+    }
+    // Keep the dialog open and say what happened; the ones that worked are gone.
+    setPending((prev) =>
+      prev ? { ...prev, ids: prev.ids.filter((id) => entries.some((e) => e.id === id)) } : prev,
+    );
+    setError(
+      pending.ids.length === 1
+        ? failures[0]
+        : `${failures.length} of ${pending.ids.length} could not be deleted. ${failures[0]}`,
+    );
   }
+
+  const target = pending && !pending.all ? entries.find((e) => e.id === pending.ids[0]) : null;
+  const targetSummary = target ? summaries[target.id] : undefined;
+  const targetUrl = target ? splitUrl(targetSummary?.targetUrl ?? target.targetUrl) : null;
+
+  const dialog = (
+    <ConfirmDialog
+      open={pending !== null}
+      title={pending?.all ? `Delete ${pending.ids.length} tests?` : 'Delete this test?'}
+      confirmLabel={pending?.all ? 'Delete all' : 'Delete'}
+      busy={busy}
+      error={error}
+      onConfirm={confirmDelete}
+      onCancel={cancel}
+    >
+      {target && targetUrl ? (
+        <div className="mb-3 flex items-center gap-3 rounded-lg border border-line bg-bg p-2">
+          <span className="h-9 w-14 flex-none overflow-hidden rounded-md border border-line bg-surface">
+            {targetSummary?.thumbnailUrl ? (
+              <img
+                src={targetSummary.thumbnailUrl}
+                alt=""
+                className="size-full object-cover object-top"
+              />
+            ) : null}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-[12.5px] font-medium text-ink">
+              {targetUrl.host}
+            </span>
+            <span className="block truncate font-mono text-[11px] text-faint">
+              {targetUrl.path} · {formatAgo(targetSummary?.createdAt ?? target.createdAt)}
+            </span>
+          </span>
+        </div>
+      ) : null}
+      {pending?.all
+        ? 'Every finished test in this browser, its findings and all of its screenshots will be removed from the server. Tests still running are kept.'
+        : 'Its findings, replay and every screenshot will be removed from the server.'}{' '}
+      <strong className="font-medium text-ink">This cannot be undone.</strong>
+    </ConfirmDialog>
+  );
 
   const collapsed = mode === 'collapsed';
 
@@ -172,6 +234,7 @@ export function HistorySidebar({
             );
           })}
         </ol>
+        {dialog}
       </aside>
     );
   }
@@ -221,7 +284,6 @@ export function HistorySidebar({
           const status = summary?.status;
           const running = status === 'running' || status === 'queued';
           const active = entry.id === activeId;
-          const busy = deleting.has(entry.id);
           const took = durationBetween(summary?.startedAt, summary?.finishedAt);
 
           return (
@@ -229,7 +291,6 @@ export function HistorySidebar({
               <button
                 type="button"
                 onClick={() => onOpen(entry.id)}
-                disabled={busy}
                 className={`flex w-full gap-3 rounded-[10px] p-2 text-left transition disabled:opacity-50 ${
                   active ? 'bg-accent/10 ring-1 ring-accent/30' : 'hover:bg-raised'
                 }`}
@@ -281,48 +342,15 @@ export function HistorySidebar({
               {!running ? (
                 <button
                   type="button"
-                  onClick={() => setConfirming(entry.id)}
-                  disabled={busy}
+                  onClick={() => ask([entry.id], false)}
                   aria-label={`Delete the test of ${host}`}
                   title="Delete this test and its screenshots"
                   className="absolute top-2 right-2 grid size-6 place-items-center rounded-md text-faint opacity-0 transition group-hover:opacity-100 hover:bg-critical/10 hover:text-critical focus-visible:opacity-100"
                 >
-                  {busy ? (
-                    <span className="size-3 animate-spin-fast rounded-full border-2 border-current border-r-transparent" />
-                  ) : (
-                    <svg className="size-3.5" {...ICON}>
-                      <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
-                    </svg>
-                  )}
+                  <svg className="size-3.5" {...ICON}>
+                    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
+                  </svg>
                 </button>
-              ) : null}
-
-              {confirming === entry.id ? (
-                <div className="mx-2 mb-2 rounded-lg border border-critical/40 bg-critical/5 p-2.5 text-[12px]">
-                  <p className="text-ink">
-                    Delete this test and its screenshots? This cannot be undone.
-                  </p>
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => remove([entry.id])}
-                      className="rounded-md bg-critical px-2.5 py-1 font-medium text-white hover:brightness-110"
-                    >
-                      Delete
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirming(null)}
-                      className="rounded-md border border-line-strong px-2.5 py-1 text-muted hover:text-ink"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              {failures[entry.id] ? (
-                <p className="mx-2 mb-2 text-[11.5px] text-critical">{failures[entry.id]}</p>
               ) : null}
             </li>
           );
@@ -331,39 +359,21 @@ export function HistorySidebar({
 
       {deletable.length > 1 ? (
         <footer className="border-t border-line p-3">
-          {confirming === 'all' ? (
-            <div className="text-[12px]">
-              <p className="text-ink">
-                Delete {deletable.length} finished tests and all their screenshots?
-              </p>
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => remove(deletable.map((e) => e.id))}
-                  className="rounded-md bg-critical px-2.5 py-1 font-medium text-white hover:brightness-110"
-                >
-                  Delete all
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirming(null)}
-                  className="rounded-md border border-line-strong px-2.5 py-1 text-muted hover:text-ink"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirming('all')}
-              className="w-full rounded-md px-2 py-1.5 text-[12px] text-faint transition hover:bg-critical/10 hover:text-critical"
-            >
-              Delete all finished tests
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() =>
+              ask(
+                deletable.map((e) => e.id),
+                true,
+              )
+            }
+            className="w-full rounded-md px-2 py-1.5 text-[12px] text-faint transition hover:bg-critical/10 hover:text-critical"
+          >
+            Delete all finished tests
+          </button>
         </footer>
       ) : null}
+      {dialog}
     </aside>
   );
 }

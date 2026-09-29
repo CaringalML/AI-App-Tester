@@ -95,6 +95,8 @@ html[data-theme='light'] {
   --animate-bob: bob 1.8s ease-in-out infinite;
   --animate-ring: ring 1.4s ease-out infinite;
   --animate-rise: rise 0.3s ease both;
+  --animate-pop: pop 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  --animate-fade: fade 0.16s ease-out both;
 }
 
 @keyframes bob {
@@ -166,4 +168,24 @@ html[data-theme='light'] {
     color-mix(in oklab, var(--accent) 14%, transparent),
     transparent 72%
   );
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
