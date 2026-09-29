@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ScanOptions } from '../lib/types';
+import { formatDuration, useElapsed } from '../lib/time';
 import { checkUrl } from '../lib/url';
 
 interface Props {
@@ -7,6 +8,8 @@ interface Props {
   onOptionsChange: (next: ScanOptions) => void;
   onSubmit: (url: string) => void;
   busy: boolean;
+  /** When the current scan started, to show elapsed time on the button. */
+  busySince?: number | null;
 }
 
 const TOGGLES: Array<{ key: keyof ScanOptions; label: string; hint: string }> = [
@@ -16,10 +19,15 @@ const TOGGLES: Array<{ key: keyof ScanOptions; label: string; hint: string }> = 
     label: 'Could be better',
     hint: 'Rough edges that still technically work',
   },
-  { key: 'checkAccessibility', label: 'Accessibility', hint: 'Contrast, labels and keyboard access' },
+  {
+    key: 'checkAccessibility',
+    label: 'Accessibility',
+    hint: 'Contrast, labels and keyboard access',
+  },
 ];
 
-export function ScanForm({ options, onOptionsChange, onSubmit, busy }: Props) {
+export function ScanForm({ options, onOptionsChange, onSubmit, busy, busySince }: Props) {
+  const elapsed = useElapsed(busySince, busy);
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -90,6 +98,7 @@ export function ScanForm({ options, onOptionsChange, onSubmit, busy }: Props) {
                 aria-hidden="true"
               />
               Testing
+              <span className="font-mono tabular-nums opacity-80">{formatDuration(elapsed)}</span>
             </>
           ) : (
             <>

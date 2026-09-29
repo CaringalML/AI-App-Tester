@@ -4,6 +4,7 @@ import { SEVERITY_ORDER } from '../lib/types';
 import { reportUrl } from '../lib/api';
 import { FindingCard } from './FindingCard';
 import { TestRunner } from './TestRunner';
+import { durationBetween, formatDuration, useElapsed } from '../lib/time';
 
 /** A real scan produces 30+ steps; the log shows the most recent ones. */
 const VISIBLE_STEPS = 12;
@@ -16,6 +17,8 @@ interface Props {
   /** Live command log while running; the finished scan carries its own. */
   timeline: TimelineStep[];
   targetUrl?: string;
+  /** Client clock when the scan started, for the live timer. */
+  runStartedAt: number | null;
 }
 
 type Filter = 'all' | Category;
@@ -24,11 +27,21 @@ const PANEL = 'rounded-[14px] border border-line bg-surface';
 /** Idle, error and placeholder states stay form-width; the runner and results use the full width. */
 const NARROW = 'mx-auto w-full max-w-193';
 
-export function FindingsPanel({ phase, progress, result, error, timeline, targetUrl }: Props) {
+export function FindingsPanel({
+  phase,
+  progress,
+  result,
+  error,
+  timeline,
+  targetUrl,
+  runStartedAt,
+}: Props) {
   const [filter, setFilter] = useState<Filter>('all');
   const [pinned, setPinned] = useState<number | null>(null);
   const runnerRef = useRef<HTMLDivElement>(null);
   const steps = result?.timeline?.length ? result.timeline : timeline;
+  const elapsed = useElapsed(runStartedAt, phase === 'running');
+  const duration = result ? durationBetween(result.startedAt, result.finishedAt) : null;
 
   /** The replay step that shows a finding: where it was reported, else its first cited action. */
   function stepFor(finding: Finding): TimelineStep | undefined {
@@ -85,7 +98,14 @@ export function FindingsPanel({ phase, progress, result, error, timeline, target
 
   if (phase === 'running' && steps.length) {
     return (
-      <TestRunner steps={steps} live targetUrl={targetUrl} pinned={pinned} onPin={setPinned} />
+      <TestRunner
+        steps={steps}
+        live
+        targetUrl={targetUrl}
+        pinned={pinned}
+        onPin={setPinned}
+        startedAtMs={runStartedAt}
+      />
     );
   }
 
@@ -95,6 +115,9 @@ export function FindingsPanel({ phase, progress, result, error, timeline, target
         <div className="flex items-center gap-2.5">
           <span className="size-2 animate-ring rounded-full bg-accent" aria-hidden="true" />
           <h3 className="text-[15px] font-semibold tracking-tight">Working through the app</h3>
+          <span className="ml-auto font-mono text-[14px] font-semibold text-muted tabular-nums">
+            {formatDuration(elapsed)}
+          </span>
         </div>
 
         <ol className="mt-4 grid gap-2.25" aria-live="polite">
@@ -126,6 +149,7 @@ export function FindingsPanel({ phase, progress, result, error, timeline, target
             targetUrl={result?.targetUrl ?? targetUrl}
             pinned={pinned}
             onPin={setPinned}
+            durationMs={duration}
           />
         </div>
       ) : null}
@@ -222,9 +246,8 @@ export function FindingsPanel({ phase, progress, result, error, timeline, target
 function runStats(result: ScanResult): string {
   const parts = [`${result.pagesVisited} page${result.pagesVisited === 1 ? '' : 's'}`];
   if (result.agentSteps) parts.push(`${result.agentSteps} tool calls by Claude`);
-  const started = Date.parse(result.startedAt);
-  const finished = Date.parse(result.finishedAt);
-  if (started && finished) parts.push(`${Math.round((finished - started) / 1000)}s`);
+  const took = durationBetween(result.startedAt, result.finishedAt);
+  if (took !== null) parts.push(`took ${formatDuration(took)}`);
   const cost = result.usage?.estimatedCostUsd;
   if (cost != null) parts.push(`about $${cost.toFixed(2)} in API usage`);
   return `${parts.join(' · ')} on ${result.targetUrl}`;

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StepKind, TimelineStep } from '../lib/types';
+import { formatDuration, useElapsed } from '../lib/time';
 
 /*
  * A Cypress-style runner for a scan.
@@ -18,6 +19,10 @@ interface Props {
   /** Pinned step index, or null to follow the latest step. */
   pinned: number | null;
   onPin: (index: number | null) => void;
+  /** Client clock when the user pressed Run; drives the live timer. */
+  startedAtMs?: number | null;
+  /** Server-measured run length once the scan has finished. */
+  durationMs?: number | null;
 }
 
 /* Literal class names so Tailwind generates them; see FindingCard for the same pattern. */
@@ -83,7 +88,15 @@ function pathOf(url?: string | null): string {
   }
 }
 
-export function TestRunner({ steps, live, targetUrl, pinned, onPin }: Props) {
+export function TestRunner({
+  steps,
+  live,
+  targetUrl,
+  pinned,
+  onPin,
+  startedAtMs,
+  durationMs,
+}: Props) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [showBefore, setShowBefore] = useState(true);
   const [idleSeconds, setIdleSeconds] = useState(0);
@@ -108,6 +121,13 @@ export function TestRunner({ steps, live, targetUrl, pinned, onPin }: Props) {
   }, [steps.length, following]);
 
   // Tick while live so the "thinking" hint appears during long model turns.
+  const elapsed = useElapsed(startedAtMs, live);
+  const firstAt = steps.length ? Date.parse(steps[0].at) : NaN;
+  const lastStepAt = steps.length ? Date.parse(steps[steps.length - 1].at) : NaN;
+  const runMs = live
+    ? elapsed
+    : (durationMs ?? (Number.isFinite(firstAt) ? lastStepAt - firstAt : 0));
+
   const lastAt = steps.at(-1)?.at;
   useEffect(() => {
     if (!live) return;
@@ -145,18 +165,45 @@ export function TestRunner({ steps, live, targetUrl, pinned, onPin }: Props) {
               </span>
             ) : null}
           </div>
-          <div className="flex gap-2.5 font-mono text-[11px] text-faint">
-            <span title="Browser actions">{counts.actions} actions</span>
-            {counts.failed ? (
-              <span className="text-critical" title="Actions that failed">
-                {counts.failed} failed
-              </span>
-            ) : null}
-            <span className="text-medium" title="Findings reported">
-              {counts.findings} found
+          <div
+            className={`flex items-center gap-1.5 font-mono text-[15px] font-semibold tabular-nums ${
+              live ? 'text-ink' : 'text-muted'
+            }`}
+            title={live ? 'Time since the test started' : 'Total time the test took'}
+            aria-live="off"
+          >
+            <span className={live ? 'text-accent' : 'text-faint'}>
+              <svg
+                className="size-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="13" r="8" />
+                <path d="M12 9v4l2.5 2.5M9 2h6" />
+              </svg>
             </span>
+            {formatDuration(runMs)}
           </div>
         </header>
+
+        <div className="flex gap-2.5 border-b border-line px-4 py-1.5 font-mono text-[11px] text-faint">
+          <span className="flex-1">
+            {live ? 'Elapsed' : 'Finished in ' + formatDuration(runMs)}
+          </span>
+          <span title="Browser actions">{counts.actions} actions</span>
+          {counts.failed ? (
+            <span className="text-critical" title="Actions that failed">
+              {counts.failed} failed
+            </span>
+          ) : null}
+          <span className="text-medium" title="Findings reported">
+            {counts.findings} found
+          </span>
+        </div>
 
         <ol
           ref={logRef}
@@ -216,6 +263,12 @@ export function TestRunner({ steps, live, targetUrl, pinned, onPin }: Props) {
                         Action did not complete
                       </span>
                     ) : null}
+                  </span>
+                  <span
+                    className="flex-none self-start pt-px font-mono text-[10.5px] text-faint tabular-nums"
+                    title="Time since the test started"
+                  >
+                    {Number.isFinite(firstAt) ? formatDuration(Date.parse(s.at) - firstAt) : ''}
                   </span>
                   {s.signals ? (
                     <span

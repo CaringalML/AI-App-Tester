@@ -15,18 +15,22 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineStep[]>([]);
   const [target, setTarget] = useState<string>('');
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const resultsRef = useRef<HTMLElement>(null);
 
-  // Bring the live runner into view as soon as a scan starts.
+  // Bring the runner into view the moment it first appears. Scrolling when the scan
+  // merely starts does nothing: the page is still short and the runner not rendered.
+  const runnerVisible = phase === 'running' && timeline.length > 0;
   useEffect(() => {
-    if (phase === 'running') resultsRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [phase]);
+    if (runnerVisible) resultsRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [runnerVisible]);
 
   async function handleScan(url: string) {
     setPhase('running');
     setProgress([]);
     setTimeline([]);
     setTarget(url);
+    setRunStartedAt(Date.now());
     setResult(null);
     setError(null);
 
@@ -88,6 +92,7 @@ export default function App() {
           onOptionsChange={setOptions}
           onSubmit={handleScan}
           busy={phase === 'running'}
+          busySince={runStartedAt}
         />
       </main>
 
@@ -103,6 +108,7 @@ export default function App() {
           error={error}
           timeline={timeline}
           targetUrl={target}
+          runStartedAt={runStartedAt}
         />
       </section>
 
