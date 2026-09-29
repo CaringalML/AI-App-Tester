@@ -39,7 +39,15 @@ class S3ArtifactStore:
 
         self.bucket = bucket
         self._links: dict[str, tuple[str, float]] = {}
-        self._s3 = boto3.client("s3", region_name=region, config=Config(signature_version="s3v4"))
+        # Sign for the regional endpoint. Links signed for the global s3.amazonaws.com
+        # host get a 307 to the regional one for buckets outside us-east-1, and the
+        # signature covers the host, so a browser following that redirect gets an error.
+        self._s3 = boto3.client(
+            "s3",
+            region_name=region,
+            endpoint_url=f"https://s3.{region}.amazonaws.com",
+            config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+        )
 
     async def save_jpeg(self, key: str, data: bytes) -> None:
         await asyncio.to_thread(

@@ -138,3 +138,9 @@ async def test_presigned_links_are_reused_so_the_replay_does_not_flicker() -> No
     first = await store.url_for("k.jpg")
     second = await store.url_for("k.jpg")
     assert first == second and len(calls) == 1
+
+
+def test_links_are_signed_for_the_regional_s3_endpoint() -> None:
+    # The global endpoint 307-redirects for non-us-east-1 buckets, breaking the signature.
+    store = S3ArtifactStore("bucket-name", "ap-southeast-2")
+    assert store._s3.meta.endpoint_url == "https://s3.ap-southeast-2.amazonaws.com"
