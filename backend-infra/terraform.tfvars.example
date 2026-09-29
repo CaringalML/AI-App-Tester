@@ -11,7 +11,7 @@ github_environment = "production"
 
 anthropic_model = "claude-opus-5-5"
 # Only for organization-level keys that are not scoped to a workspace.
-anthropic_workspace_id = ""
+anthropic_workspace_id = "wrkspc_01Wqia2TeDBpN3RHt3qe5zSN"
 agent_effort           = "medium"
 max_agent_steps        = 30
 
