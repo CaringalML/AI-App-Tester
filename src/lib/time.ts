@@ -29,3 +29,18 @@ export function durationBetween(start?: string | null, end?: string | null): num
   const to = end ? Date.parse(end) : NaN;
   return Number.isFinite(from) && Number.isFinite(to) ? Math.max(0, to - from) : null;
 }
+
+/** "just now", "5 min ago", "3 h ago", "2 days ago", then a date. */
+export function formatAgo(iso: string, now: number = Date.now()): string {
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return '';
+  const seconds = Math.max(0, (now - then) / 1000);
+  if (seconds < 45) return 'just now';
+  if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`;
+  if (seconds < 86_400) return `${Math.round(seconds / 3600)} h ago`;
+  if (seconds < 7 * 86_400) {
+    const days = Math.round(seconds / 86_400);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+  }
+  return new Date(then).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}

@@ -23,6 +23,8 @@ interface Props {
   startedAtMs?: number | null;
   /** Server-measured run length once the scan has finished. */
   durationMs?: number | null;
+  /** All findings once the scan is done; while live, only Claude's are known. */
+  findingsTotal?: number;
 }
 
 /* Literal class names so Tailwind generates them; see FindingCard for the same pattern. */
@@ -96,6 +98,7 @@ export function TestRunner({
   onPin,
   startedAtMs,
   durationMs,
+  findingsTotal,
 }: Props) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [showBefore, setShowBefore] = useState(true);
@@ -201,7 +204,7 @@ export function TestRunner({
             </span>
           ) : null}
           <span className="text-medium" title="Findings reported">
-            {counts.findings} found
+            {findingsTotal ?? counts.findings} found
           </span>
         </div>
 

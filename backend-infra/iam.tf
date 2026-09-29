@@ -45,14 +45,21 @@ resource "aws_iam_role" "task" {
 data "aws_iam_policy_document" "task" {
   statement {
     sid       = "ScanRecords"
-    actions   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"]
     resources = [aws_dynamodb_table.scans.arn]
   }
 
   statement {
     sid       = "EvidenceScreenshots"
-    actions   = ["s3:PutObject", "s3:GetObject"]
+    actions   = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]
     resources = ["${aws_s3_bucket.artifacts.arn}/*"]
+  }
+
+  # Deleting a scan lists its prefix to find every frame it stored.
+  statement {
+    sid       = "ListScanFrames"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.artifacts.arn]
   }
 }
 

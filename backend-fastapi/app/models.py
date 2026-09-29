@@ -155,6 +155,9 @@ class Scan(ApiModel):
     usage: Usage = Field(default_factory=Usage)
     notes: list[str] = Field(default_factory=list)
     error: str | None = None
+    # sha256 of the owner token handed to whoever started the scan. Deleting a
+    # scan requires the token; only its hash is stored. Never sent to clients.
+    owner_token_hash: str | None = None
     # Epoch seconds. DynamoDB's TTL deletes the record after this.
     expires_at: int = 0
 
@@ -162,3 +165,20 @@ class Scan(ApiModel):
 class ScanAccepted(ApiModel):
     id: str
     status: ScanStatus
+    # Returned once, at creation. The browser keeps it to prove ownership on delete.
+    owner_token: str
+
+
+class ScanSummary(ApiModel):
+    """One row of the history sidebar: enough to recognise a run without loading it."""
+
+    id: str
+    target_url: str
+    status: ScanStatus
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    bugs: int = 0
+    improvements: int = 0
+    thumbnail_url: str | None = None
+    error: str | None = None

@@ -107,6 +107,22 @@ export interface Usage {
 
 export type ScanPhase = 'idle' | 'running' | 'done' | 'error';
 
+export type ScanStatus = 'queued' | 'running' | 'done' | 'error';
+
+/** One row of the history sidebar, as returned by GET /scans?ids=... */
+export interface ScanSummary {
+  id: string;
+  targetUrl: string;
+  status: ScanStatus;
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  bugs: number;
+  improvements: number;
+  thumbnailUrl?: string | null;
+  error?: string | null;
+}
+
 export interface ScanOptions {
   findBugs: boolean;
   findImprovements: boolean;

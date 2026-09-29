@@ -1,21 +1,26 @@
 """HTTP API. Start a scan, poll it, export it."""
 
+import asyncio
+import hashlib
+import hmac
 import logging
 import os
 import re
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
 import anthropic
-from fastapi import FastAPI, HTTPException, Request, Response
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .artifacts import ArtifactStore, LocalArtifactStore, S3ArtifactStore
 from .config import Settings, get_settings
-from .models import Scan, ScanAccepted, ScanRequest, utcnow
+from .models import Scan, ScanAccepted, ScanRequest, ScanSummary, utcnow
 from .report import render_markdown
 from .scanner.runner import ScanRunner
 from .security import RateLimiter, TargetGuard, TargetNotAllowedError
@@ -23,6 +28,12 @@ from .store import DynamoScanStore, MemoryScanStore, ScanStore
 
 log = logging.getLogger("app")
 _SCAN_ID = re.compile(r"^[0-9a-f]{32}$")
+# History lookups are capped so one request cannot fan out into hundreds of reads.
+MAX_HISTORY = 30
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def _client_id(request: Request) -> str:
@@ -84,8 +95,8 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type", "X-Owner-Token"],
         max_age=600,
     )
     if isinstance(artifacts, LocalArtifactStore):
@@ -124,27 +135,36 @@ def create_app(
                 headers={"Retry-After": str(int(wait))},
             )
 
+        owner_token = secrets.token_urlsafe(24)
         scan = Scan(
             id=uuid.uuid4().hex,
             target_url=target,
             options=body.options,
             model=settings.anthropic_model,
+            owner_token_hash=_hash_token(owner_token),
         )
         await store.put(scan)
         runner.start(scan)
-        return ScanAccepted(id=scan.id, status=scan.status)
+        return ScanAccepted(id=scan.id, status=scan.status, owner_token=owner_token)
 
-    async def load(scan_id: str) -> Scan:
+    stale_after = timedelta(seconds=settings.scan_timeout_seconds + 180)
+
+    def settle_status(scan: Scan) -> Scan:
+        # A scan left "running" long past its limit belonged to a task that died.
+        if scan.status in ("queued", "running") and utcnow() - scan.updated_at > stale_after:
+            scan.status, scan.error = "error", "The scan was interrupted before it finished."
+        return scan
+
+    async def fetch(scan_id: str) -> Scan:
         if not _SCAN_ID.match(scan_id):
             raise HTTPException(status_code=404, detail="Scan not found.")
         scan = await store.get(scan_id)
         if scan is None:
             raise HTTPException(status_code=404, detail="Scan not found.")
+        return settle_status(scan)
 
-        # A scan left "running" long past its limit belonged to a task that died.
-        stale_after = timedelta(seconds=settings.scan_timeout_seconds + 180)
-        if scan.status in ("queued", "running") and utcnow() - scan.updated_at > stale_after:
-            scan.status, scan.error = "error", "The scan was interrupted before it finished."
+    async def load(scan_id: str) -> Scan:
+        scan = await fetch(scan_id)
 
         for finding in scan.findings:
             if finding.screenshot_key:
@@ -156,7 +176,83 @@ def create_app(
                 step.before_url = await artifacts.url_for(step.before_key)
         return scan
 
-    @app.get("/scans/{scan_id}", response_model=Scan, tags=["scans"])
+    @app.get("/scans", response_model=list[ScanSummary], tags=["scans"])
+    async def list_scans(
+        response: Response,
+        ids: str = Query(
+            max_length=MAX_HISTORY * 33,
+            description="Comma-separated scan ids from this browser's history.",
+        ),
+    ) -> list[ScanSummary]:
+        """Summaries for the history sidebar.
+
+        There are no accounts, so there is no "list everything" endpoint: the browser
+        sends the ids it started, and ids that expired or were deleted are simply
+        absent from the response, which tells the sidebar to forget them.
+        """
+        response.headers["Cache-Control"] = "no-store"
+        wanted = list(dict.fromkeys(i for i in ids.split(",") if _SCAN_ID.match(i)))
+        scans = await asyncio.gather(*(store.get(i) for i in wanted[:MAX_HISTORY]))
+        summaries = []
+        for scan in scans:
+            if scan is None:
+                continue
+            settle_status(scan)
+            thumb = next((s.screenshot_key for s in scan.timeline if s.screenshot_key), None)
+            summaries.append(
+                ScanSummary(
+                    id=scan.id,
+                    target_url=scan.target_url,
+                    status=scan.status,
+                    created_at=scan.created_at,
+                    started_at=scan.started_at,
+                    finished_at=scan.finished_at,
+                    bugs=sum(1 for f in scan.findings if f.category == "bug"),
+                    improvements=sum(1 for f in scan.findings if f.category == "improvement"),
+                    thumbnail_url=await artifacts.url_for(thumb) if thumb else None,
+                    error=scan.error,
+                )
+            )
+        return summaries
+
+    @app.delete("/scans/{scan_id}", status_code=204, tags=["scans"])
+    async def delete_scan(
+        scan_id: str,
+        x_owner_token: str = Header(
+            default="", description="Token returned when the scan started."
+        ),
+    ) -> Response:
+        """Delete a scan's record and every screenshot it stored."""
+        scan = await fetch(scan_id)
+        if not scan.owner_token_hash or not hmac.compare_digest(
+            scan.owner_token_hash, _hash_token(x_owner_token)
+        ):
+            raise HTTPException(
+                status_code=403, detail="Only the browser that ran this scan can delete it."
+            )
+        if scan.status in ("queued", "running"):
+            raise HTTPException(
+                status_code=409, detail="This scan is still running. Delete it once it finishes."
+            )
+        try:
+            # Screenshots first: if the record delete then failed, the scan would still
+            # be listed and could be retried, rather than leaving orphaned files behind.
+            removed = await artifacts.delete_prefix(f"{scan.id}/")
+            await store.delete(scan.id)
+        except (ClientError, BotoCoreError) as exc:
+            log.error("delete of %s failed: %s", scan.id, exc)
+            raise HTTPException(
+                status_code=503, detail="The server could not delete this scan right now."
+            ) from exc
+        log.info("deleted scan %s and %d stored file(s)", scan.id, removed)
+        return Response(status_code=204)
+
+    @app.get(
+        "/scans/{scan_id}",
+        response_model=Scan,
+        response_model_exclude={"owner_token_hash"},
+        tags=["scans"],
+    )
     async def get_scan(scan_id: str, response: Response) -> Scan:
         response.headers["Cache-Control"] = "no-store"
         return await load(scan_id)

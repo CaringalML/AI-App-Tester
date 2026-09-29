@@ -150,6 +150,7 @@ export function FindingsPanel({
             pinned={pinned}
             onPin={setPinned}
             durationMs={duration}
+            findingsTotal={result?.findings.length}
           />
         </div>
       ) : null}

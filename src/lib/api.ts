@@ -6,7 +6,7 @@
  * scan, get an id back immediately, then poll its record and stream the
  * progress log into the UI until it finishes.
  */
-import type { ScanOptions, ScanResult, TimelineStep } from './types';
+import type { ScanOptions, ScanResult, ScanStatus, ScanSummary, TimelineStep } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL?.replace(/\/+$/, '');
 
@@ -17,7 +17,7 @@ const POLL_MS = 1500;
 const GIVE_UP_MS = 8 * 60 * 1000;
 
 interface ApiScan extends Omit<ScanResult, 'pagesVisited'> {
-  status: 'queued' | 'running' | 'done' | 'error';
+  status: ScanStatus;
   error?: string | null;
   visitedUrls: string[];
   progress: { at: string; message: string; kind: string }[];
@@ -27,6 +27,10 @@ export class ScanError extends Error {}
 
 /** What the UI can show while a scan is still running. */
 export interface LiveUpdate {
+  status: ScanStatus;
+  /** Server start time, used to resume the live timer when reopening a running scan. */
+  startedAt: string | null;
+  targetUrl: string;
   progress: string[];
   timeline: TimelineStep[];
 }
@@ -44,11 +48,23 @@ async function readError(response: Response): Promise<string> {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function runLiveScan(
-  targetUrl: string,
-  options: ScanOptions,
-  onUpdate: (update: LiveUpdate) => void,
-): Promise<ScanResult> {
+function toResult(scan: ApiScan): ScanResult {
+  return {
+    ...scan,
+    pagesVisited: scan.visitedUrls.length,
+    startedAt: scan.startedAt ?? '',
+    finishedAt: scan.finishedAt ?? '',
+    notes: scan.error ? [scan.error, ...(scan.notes ?? [])] : scan.notes,
+  };
+}
+
+export interface StartedScan {
+  id: string;
+  /** Proof of ownership for deleting the scan later. Kept in this browser only. */
+  ownerToken: string;
+}
+
+export async function startScan(targetUrl: string, options: ScanOptions): Promise<StartedScan> {
   let started: Response;
   try {
     started = await fetch(`${API_URL}/scans`, {
@@ -60,21 +76,41 @@ export async function runLiveScan(
     throw new ScanError('Could not reach the tester. Check your connection and try again.');
   }
   if (!started.ok) throw new ScanError(await readError(started));
-  const { id } = (await started.json()) as { id: string };
+  return (await started.json()) as StartedScan;
+}
 
+/**
+ * Poll a scan until it finishes, reporting progress on the way. Used both for a
+ * scan just started and for reopening one from history, so a run that is still
+ * going resumes its live view. Resolves immediately for a finished scan.
+ */
+export async function followScan(
+  id: string,
+  onUpdate: (update: LiveUpdate) => void,
+  signal?: AbortSignal,
+): Promise<ScanResult> {
   const giveUpAt = Date.now() + GIVE_UP_MS;
+  let first = true;
   while (Date.now() < giveUpAt) {
-    await wait(POLL_MS);
+    if (!first) await wait(POLL_MS);
+    first = false;
+    if (signal?.aborted) throw new DOMException('Stopped following this scan', 'AbortError');
+
     let response: Response;
     try {
-      response = await fetch(`${API_URL}/scans/${id}`, { cache: 'no-store' });
-    } catch {
+      response = await fetch(`${API_URL}/scans/${id}`, { cache: 'no-store', signal });
+    } catch (cause) {
+      if (signal?.aborted) throw cause;
       continue; // a dropped poll is not a failed scan; try again next tick
     }
     if (!response.ok) throw new ScanError(await readError(response));
 
     const scan = (await response.json()) as ApiScan;
+    if (signal?.aborted) throw new DOMException('Stopped following this scan', 'AbortError');
     onUpdate({
+      status: scan.status,
+      startedAt: scan.startedAt ?? null,
+      targetUrl: scan.targetUrl,
       progress: scan.progress.map((event) => event.message),
       timeline: scan.timeline ?? [],
     });
@@ -82,17 +118,30 @@ export async function runLiveScan(
     if (scan.status === 'error' && scan.findings.length === 0) {
       throw new ScanError(scan.error ?? 'The scan failed.');
     }
-    if (scan.status === 'done' || scan.status === 'error') {
-      return {
-        ...scan,
-        pagesVisited: scan.visitedUrls.length,
-        startedAt: scan.startedAt ?? '',
-        finishedAt: scan.finishedAt ?? '',
-        notes: scan.error ? [scan.error, ...(scan.notes ?? [])] : scan.notes,
-      };
-    }
+    if (scan.status === 'done' || scan.status === 'error') return toResult(scan);
   }
   throw new ScanError('The scan is taking longer than expected. Try again with fewer pages.');
+}
+
+export async function fetchHistory(ids: string[]): Promise<ScanSummary[]> {
+  if (!ids.length) return [];
+  const response = await fetch(`${API_URL}/scans?ids=${ids.join(',')}`, { cache: 'no-store' });
+  if (!response.ok) throw new ScanError(await readError(response));
+  return (await response.json()) as ScanSummary[];
+}
+
+export async function deleteScan(id: string, ownerToken: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/scans/${id}`, {
+      method: 'DELETE',
+      headers: { 'X-Owner-Token': ownerToken },
+    });
+  } catch {
+    throw new ScanError('Could not reach the tester to delete this scan.');
+  }
+  // Already gone (expired or deleted elsewhere) is the outcome the user asked for.
+  if (!response.ok && response.status !== 404) throw new ScanError(await readError(response));
 }
 
 export function reportUrl(scanId: string): string {

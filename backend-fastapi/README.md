@@ -49,7 +49,18 @@ rejects every request until you also set `ANTHROPIC_WORKSPACE_ID`.
 | `POST` | `/scans` | Start a scan. Body: `{"url": "...", "options": {"maxPages": 5}}`. Returns `202` with an id |
 | `GET` | `/scans/{id}` | Poll status, live progress, findings, usage and cost |
 | `GET` | `/scans/{id}/report.md` | The finished report as Markdown, ready to paste into an issue |
+| `GET` | `/scans?ids=a,b,c` | Summaries for the history sidebar (up to 30 ids). Unknown or expired ids are left out |
+| `DELETE` | `/scans/{id}` | Delete the record and every stored screenshot. Needs the `X-Owner-Token` returned when the scan started |
 | `GET` | `/healthz` | Liveness, model, and whether Claude is configured |
+
+## History without accounts
+
+There is no login, so there is deliberately no endpoint that lists everyone's scans.
+Starting a scan returns a random owner token; the browser keeps the scan id and token
+locally, and the server stores only the token's SHA-256 hash, compared in constant time.
+The sidebar asks for summaries of the ids it holds, and only the holder of a token can
+delete that scan. Deleting removes the screenshots first, then the record, so a failure
+part-way leaves the scan listed and retryable rather than leaving orphaned files.
 
 ## Guardrails for a public endpoint
 

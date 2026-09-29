@@ -1,6 +1,7 @@
 """Evidence screenshots: S3 with short-lived presigned links in AWS, local disk in dev."""
 
 import asyncio
+import shutil
 import time
 from pathlib import Path
 from typing import Protocol
@@ -9,6 +10,7 @@ from typing import Protocol
 class ArtifactStore(Protocol):
     async def save_jpeg(self, key: str, data: bytes) -> None: ...
     async def url_for(self, key: str) -> str: ...
+    async def delete_prefix(self, prefix: str) -> int: ...
 
 
 class LocalArtifactStore:
@@ -24,6 +26,14 @@ class LocalArtifactStore:
 
     async def url_for(self, key: str) -> str:
         return f"{self.base_url}/artifacts/{key}"
+
+    async def delete_prefix(self, prefix: str) -> int:
+        target = (self.root / prefix).resolve()
+        if not target.is_relative_to(self.root.resolve()) or not target.exists():
+            return 0
+        count = sum(1 for p in target.rglob("*") if p.is_file())
+        await asyncio.to_thread(shutil.rmtree, target)
+        return count
 
 
 class S3ArtifactStore:
@@ -74,3 +84,20 @@ class S3ArtifactStore:
             self._links.clear()
         self._links[key] = (url, now + self.PRESIGN_SECONDS)
         return url
+
+    async def delete_prefix(self, prefix: str) -> int:
+        """Delete every object under the prefix; returns how many were removed."""
+        return await asyncio.to_thread(self._delete_prefix, prefix)
+
+    def _delete_prefix(self, prefix: str) -> int:
+        removed = 0
+        paginator = self._s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            keys = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+            # delete_objects takes at most 1000 keys, which is also a page's size.
+            if keys:
+                self._s3.delete_objects(Bucket=self.bucket, Delete={"Objects": keys, "Quiet": True})
+                removed += len(keys)
+            for key in keys:
+                self._links.pop(key["Key"], None)
+        return removed

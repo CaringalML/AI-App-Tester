@@ -11,6 +11,7 @@ from .models import Scan
 class ScanStore(Protocol):
     async def put(self, scan: Scan) -> None: ...
     async def get(self, scan_id: str) -> Scan | None: ...
+    async def delete(self, scan_id: str) -> None: ...
 
 
 class MemoryScanStore:
@@ -24,6 +25,9 @@ class MemoryScanStore:
     async def get(self, scan_id: str) -> Scan | None:
         raw = self._scans.get(scan_id)
         return Scan.model_validate_json(raw) if raw else None
+
+    async def delete(self, scan_id: str) -> None:
+        self._scans.pop(scan_id, None)
 
 
 class DynamoScanStore:
@@ -45,6 +49,9 @@ class DynamoScanStore:
         if not item:
             return None
         return Scan.model_validate_json(json.dumps(item, default=_from_decimal))
+
+    async def delete(self, scan_id: str) -> None:
+        await asyncio.to_thread(self._table.delete_item, Key={"id": scan_id})
 
 
 def _from_decimal(value: object) -> float | int:
