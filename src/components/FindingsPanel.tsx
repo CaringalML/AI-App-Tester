@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { Category, ScanPhase, ScanResult } from '../lib/types';
 import { SEVERITY_ORDER } from '../lib/types';
+import { reportUrl } from '../lib/api';
 import { FindingCard } from './FindingCard';
+
+/** A real scan produces 30+ steps; the log shows the most recent ones. */
+const VISIBLE_STEPS = 12;
 
 interface Props {
   phase: ScanPhase;
@@ -65,18 +69,21 @@ export function FindingsPanel({ phase, progress, result, error }: Props) {
           <h3 className="text-[15px] font-semibold tracking-tight">Working through the app</h3>
         </div>
 
-        <ol className="mt-4 grid gap-2.25">
-          {progress.map((line, index) => (
+        <ol className="mt-4 grid gap-2.25" aria-live="polite">
+          {progress.slice(-VISIBLE_STEPS).map((line, index, shown) => (
             <li
-              key={line}
+              key={progress.length - shown.length + index}
               className={`relative animate-rise pl-5 text-[13.5px] before:absolute before:top-1.75 before:left-1 before:size-1.5 before:rounded-full before:bg-current ${
-                index === progress.length - 1 ? 'text-ink' : 'text-faint'
+                index === shown.length - 1 ? 'text-ink' : 'text-faint'
               }`}
             >
               {line}
             </li>
           ))}
         </ol>
+        {progress.length > VISIBLE_STEPS ? (
+          <p className="mt-3 pl-5 text-[12px] text-faint">{progress.length} steps so far</p>
+        ) : null}
       </div>
     );
   }
@@ -89,7 +96,7 @@ export function FindingsPanel({ phase, progress, result, error }: Props) {
             {sorted.length} finding{sorted.length === 1 ? '' : 's'}
           </h3>
           <p className="mt-0.5 text-[12.5px] break-all text-faint">
-            {result?.pagesVisited} pages checked on {result?.targetUrl}
+            {result ? runStats(result) : null}
           </p>
         </div>
 
@@ -122,6 +129,20 @@ export function FindingsPanel({ phase, progress, result, error }: Props) {
         </div>
       </header>
 
+      {result?.summary || result?.notes?.length || result?.id ? (
+        <div className="grid gap-3 border-b border-line px-5 py-4">
+          {result.summary ? (
+            <p className="text-[14px] leading-relaxed text-ink">{result.summary}</p>
+          ) : null}
+          {result.notes?.map((note) => (
+            <p key={note} className="text-[12.5px] text-medium">
+              {note}
+            </p>
+          ))}
+          {result.id ? <ReportActions scanId={result.id} /> : null}
+        </div>
+      ) : null}
+
       <div className="grid gap-2.5 p-3.5">
         {visible.length === 0 ? (
           <p className="p-6.5 text-center text-[13.5px] text-faint">Nothing in this category.</p>
@@ -129,6 +150,64 @@ export function FindingsPanel({ phase, progress, result, error }: Props) {
           visible.map((finding) => <FindingCard key={finding.id} finding={finding} />)
         )}
       </div>
+
+      {result?.suppressed?.length ? (
+        <details className="border-t border-line px-5 py-4 text-[13px]">
+          <summary className="cursor-pointer text-muted">
+            Filtered out as duplicates or likely noise ({result.suppressed.length})
+          </summary>
+          <ul className="mt-3 grid gap-2">
+            {result.suppressed.map(({ finding, reason }) => (
+              <li key={finding.id} className="text-faint">
+                <span className="text-muted">{finding.title}</span>: {reason}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function runStats(result: ScanResult): string {
+  const parts = [`${result.pagesVisited} page${result.pagesVisited === 1 ? '' : 's'}`];
+  if (result.agentSteps) parts.push(`${result.agentSteps} browser actions by Claude`);
+  const started = Date.parse(result.startedAt);
+  const finished = Date.parse(result.finishedAt);
+  if (started && finished) parts.push(`${Math.round((finished - started) / 1000)}s`);
+  const cost = result.usage?.estimatedCostUsd;
+  if (cost != null) parts.push(`about $${cost.toFixed(2)} in API usage`);
+  return `${parts.join(' · ')} on ${result.targetUrl}`;
+}
+
+function ReportActions({ scanId }: { scanId: string }) {
+  const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle');
+
+  async function copyMarkdown() {
+    try {
+      const response = await fetch(reportUrl(scanId));
+      await navigator.clipboard.writeText(await response.text());
+      setCopied('done');
+    } catch {
+      setCopied('failed');
+    }
+    setTimeout(() => setCopied('idle'), 2500);
+  }
+
+  const button =
+    'rounded-[8px] border border-line-strong bg-surface px-3 py-1.5 text-[12.5px] text-muted transition hover:border-accent/40 hover:text-ink';
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" className={button} onClick={copyMarkdown}>
+        {copied === 'done'
+          ? 'Copied'
+          : copied === 'failed'
+            ? 'Copy failed'
+            : 'Copy as Markdown issue'}
+      </button>
+      <a className={button} href={reportUrl(scanId)} target="_blank" rel="noreferrer">
+        Open full report
+      </a>
     </div>
   );
 }

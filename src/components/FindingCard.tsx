@@ -7,6 +7,11 @@ const CONFIDENCE_NOTE: Record<Finding['confidence'], string> = {
   low: 'Weak signal. Likely noise, shown so you can judge for yourself.',
 };
 
+const SOURCE_NOTE: Record<NonNullable<Finding['source']>, string> = {
+  automated: 'Recorded directly by the browser: an error, failed request or rule violation.',
+  agent: 'Reported by Claude while exploring, backed by the browser evidence it cites.',
+};
+
 /*
  * Tailwind scans source for complete class names, so a template string like
  * `bg-${severity}` would never be generated. These lookups keep every class
@@ -67,6 +72,19 @@ export function FindingCard({ finding }: { finding: Finding }) {
             >
               {finding.confidence} confidence
             </span>
+
+            {finding.source ? (
+              <span
+                className={`${BADGE_BASE} cursor-help normal-case ${
+                  finding.source === 'automated'
+                    ? 'border-low/40 text-low'
+                    : 'border-accent/40 text-accent'
+                }`}
+                title={SOURCE_NOTE[finding.source]}
+              >
+                {finding.source === 'automated' ? 'Browser verified' : 'Found by Claude'}
+              </span>
+            ) : null}
           </span>
 
           <span className="block text-[14.5px] leading-[1.4] font-semibold tracking-tight">
@@ -103,16 +121,34 @@ export function FindingCard({ finding }: { finding: Finding }) {
             <h4 className="mb-1.25 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
               What happened
             </h4>
-            <p className="text-sm text-muted">{finding.evidence}</p>
+            <pre className="font-mono text-[12.5px] leading-relaxed break-words whitespace-pre-wrap text-muted">
+              {finding.evidence}
+            </pre>
           </section>
+
+          {finding.screenshotUrl ? (
+            <section>
+              <h4 className="mb-1.25 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
+                Screen at the time
+              </h4>
+              <a href={finding.screenshotUrl} target="_blank" rel="noreferrer">
+                <img
+                  src={finding.screenshotUrl}
+                  alt={`Browser viewport when “${finding.title}” was recorded`}
+                  loading="lazy"
+                  className="max-h-64 rounded-lg border border-line"
+                />
+              </a>
+            </section>
+          ) : null}
 
           <section>
             <h4 className="mb-1.25 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
               How to see it yourself
             </h4>
             <ol className="grid list-decimal gap-1 pl-4.5 text-sm text-muted">
-              {finding.steps.map((step) => (
-                <li key={step}>{step}</li>
+              {finding.steps.map((step, index) => (
+                <li key={index}>{step}</li>
               ))}
             </ol>
           </section>

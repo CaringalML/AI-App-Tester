@@ -1,0 +1,10 @@
+# Runtime dependencies. Pinned to minor ranges so a rebuild months from now
+# cannot silently pick up a breaking major release.
+anthropic>=1.9,<2
+fastapi>=0.141,<0.142
+uvicorn[standard]>=0.54,<0.55
+pydantic>=2.13,<3
+pydantic-settings>=2.15,<3
+# Must match the browser build installed in the Dockerfile by `playwright install`.
+playwright==1.63.0
+boto3>=1.43,<2

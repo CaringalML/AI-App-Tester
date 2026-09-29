@@ -5,6 +5,7 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { DEFAULT_OPTIONS } from './lib/types';
 import type { ScanOptions, ScanPhase, ScanResult } from './lib/types';
 import { runMockScan } from './lib/mockScan';
+import { isLiveApi, runLiveScan } from './lib/api';
 
 export default function App() {
   const [options, setOptions] = useState<ScanOptions>(DEFAULT_OPTIONS);
@@ -20,10 +21,10 @@ export default function App() {
     setError(null);
 
     try {
-      // TODO: replace with POST /api/scan once the engine lands.
-      const scan = await runMockScan(url, options, (message) =>
-        setProgress((prev) => [...prev, message]),
-      );
+      // Builds without VITE_API_URL fall back to placeholder data, clearly labelled below.
+      const scan = isLiveApi
+        ? await runLiveScan(url, options, setProgress)
+        : await runMockScan(url, options, (message) => setProgress((prev) => [...prev, message]));
       setResult(scan);
       setPhase('done');
     } catch (cause) {
@@ -80,13 +81,23 @@ export default function App() {
       </main>
 
       <footer className="relative flex flex-wrap items-center justify-center gap-2.5 px-6 pt-4 pb-8 text-center text-[12.5px] text-faint">
-        <span className="rounded-full border border-medium/40 px-2.5 py-0.5 font-medium text-medium">
-          Placeholder results
-        </span>
-        <span>
-          The scan engine is not wired up yet. Findings shown are fixed sample data from
-          <code className="ml-1 font-mono text-[0.86em] text-muted">src/lib/mockScan.ts</code>.
-        </span>
+        {isLiveApi ? (
+          <span>
+            Evidence from a real Chromium browser. Judgement from Claude. Every finding cites what
+            the browser recorded.
+          </span>
+        ) : (
+          <>
+            <span className="rounded-full border border-medium/40 px-2.5 py-0.5 font-medium text-medium">
+              Placeholder results
+            </span>
+            <span>
+              This build is not connected to the scan API. Findings shown are fixed sample data
+              from
+              <code className="ml-1 font-mono text-[0.86em] text-muted">src/lib/mockScan.ts</code>.
+            </span>
+          </>
+        )}
       </footer>
     </div>
   );

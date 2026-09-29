@@ -1,0 +1,131 @@
+name: Deploy backend
+
+# Tests gate every deploy. The image is tagged with the commit SHA, and the ECS
+# task definition is pinned to that tag, so a rollback always means a specific
+# build rather than whatever :latest happened to point at.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend-fastapi/**'
+      - '.github/workflows/backend-deploy.yml'
+  pull_request:
+    paths:
+      - 'backend-fastapi/**'
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: backend-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-2
+  ECR_REPOSITORY: ai-app-tester-api
+  ECS_CLUSTER: ai-app-tester
+  ECS_SERVICE: ai-app-tester-api
+  TASK_FAMILY: ai-app-tester-api
+  CONTAINER_NAME: api
+
+jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend-fastapi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend-fastapi/requirements*.txt
+
+      - name: Install
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check app tests scripts && ruff format --check app tests scripts
+
+      - name: Test
+        run: pytest -q
+
+  deploy:
+    name: Build, push and roll out
+    needs: test
+    # Skips cleanly until backend-infra is applied and its role is set as a variable.
+    if: github.event_name != 'pull_request' && vars.BACKEND_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.BACKEND_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA}"
+          docker build -t "$IMAGE" -t "$REGISTRY/$ECR_REPOSITORY:latest" backend-fastapi
+          docker push "$IMAGE"
+          docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+          echo "uri=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      # Start from the newest revision (the one Terraform registered, or the
+      # previous deploy), keep its env, secrets and roles, and swap only the image.
+      - name: Register task definition revision
+        id: taskdef
+        env:
+          IMAGE: ${{ steps.image.outputs.uri }}
+        run: |
+          aws ecs describe-task-definition --task-definition "$TASK_FAMILY" \
+            --query taskDefinition > current.json
+          jq --arg image "$IMAGE" --arg name "$CONTAINER_NAME" '
+            .containerDefinitions |= map(if .name == $name then .image = $image else . end)
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)
+          ' current.json > next.json
+          ARN=$(aws ecs register-task-definition --cli-input-json file://next.json \
+            --query taskDefinition.taskDefinitionArn --output text)
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+
+      - name: Roll out and wait until healthy
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" \
+            --task-definition "${{ steps.taskdef.outputs.arn }}" > /dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+
+      - name: Smoke test the public endpoint
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS https://api.nodepulsecaringal.xyz/healthz; then exit 0; fi
+            sleep 10
+          done
+          echo "Health check did not pass through Cloudflare" >&2
+          exit 1
+
+      - name: Summary
+        run: |
+          {
+            echo "### Backend deployed"
+            echo "- Image: \`${{ steps.image.outputs.uri }}\`"
+            echo "- Task definition: \`${{ steps.taskdef.outputs.arn }}\`"
+            echo "- API: https://api.nodepulsecaringal.xyz/docs"
+          } >> "$GITHUB_STEP_SUMMARY"

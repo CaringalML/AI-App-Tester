@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest>=9.1,<10
+pytest-asyncio>=1.4,<2
+# FastAPI's TestClient is built on httpx (the anthropic SDK itself uses httpx2).
+httpx>=0.28,<0.29
+ruff>=0.13
