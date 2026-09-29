@@ -62,11 +62,22 @@ export default function App() {
     };
   }, [drawerOpen]);
 
-  /** One History button for every screen: expands the rail on desktop, opens the drawer below. */
-  function showHistory() {
-    if (window.matchMedia('(min-width: 64rem)').matches) setRailOpen(true);
-    else setDrawerOpen(true);
-  }
+  // Ctrl+B / Cmd+B toggles the sidebar, as in most apps with one.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'b' || !(event.ctrlKey || event.metaKey)) return;
+      if (event.altKey || event.shiftKey) return;
+      const typing = (event.target as HTMLElement | null)?.closest(
+        'input, textarea, [contenteditable]',
+      );
+      if (typing) return; // leave the shortcut to text fields (bold, etc.)
+      event.preventDefault();
+      if (window.matchMedia('(min-width: 64rem)').matches) setRailOpen((open) => !open);
+      else setDrawerOpen((open) => !open);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const resultsRef = useRef<HTMLElement>(null);
   // Only one scan is shown at a time; switching aborts polling of the previous one.
@@ -233,7 +244,7 @@ export default function App() {
     if (id === activeId) newTest();
   }
 
-  const sidebar = (variant: 'rail' | 'drawer', onClose: () => void) => (
+  const sidebar = (mode: 'expanded' | 'collapsed' | 'drawer', onToggle: () => void) => (
     <HistorySidebar
       entries={history}
       summaries={summaries}
@@ -241,8 +252,8 @@ export default function App() {
       onOpen={openFromHistory}
       onNewTest={newTest}
       onDelete={removeFromHistory}
-      onClose={onClose}
-      variant={variant}
+      mode={mode}
+      onToggle={onToggle}
     />
   );
 
@@ -250,15 +261,17 @@ export default function App() {
     <div className="flex min-h-full">
       {isLiveApi ? (
         <>
-          {/* Desktop: a rail that slides closed. The inner panel keeps its width while the
-              outer one animates, so the list never reflows mid-animation. */}
+          {/* Desktop: a rail that collapses to an icon strip rather than disappearing,
+              so its toggle never moves. Width animates; each state renders at its own
+              fixed width, so content never squashes mid-animation. */}
           <div
             className={`sticky top-0 hidden h-screen flex-none overflow-hidden transition-[width] duration-200 ease-out lg:block ${
-              railOpen ? 'w-72' : 'w-0'
+              railOpen ? 'w-72' : 'w-14'
             }`}
-            {...(railOpen ? {} : { inert: '', 'aria-hidden': true })}
           >
-            <div className="h-full w-72">{sidebar('rail', () => setRailOpen(false))}</div>
+            <div className={`h-full ${railOpen ? 'w-72' : 'w-14'}`}>
+              {sidebar(railOpen ? 'expanded' : 'collapsed', () => setRailOpen((open) => !open))}
+            </div>
           </div>
 
           {/* Smaller screens: a drawer over the page. */}
@@ -289,11 +302,9 @@ export default function App() {
             {isLiveApi ? (
               <button
                 type="button"
-                onClick={showHistory}
+                onClick={() => setDrawerOpen(true)}
                 aria-label="Show test history"
-                className={`flex items-center gap-1.5 rounded-[9px] border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-muted transition hover:text-ink ${
-                  railOpen ? 'lg:hidden' : ''
-                }`}
+                className="flex items-center gap-1.5 rounded-[9px] border border-line bg-surface px-2.5 py-1.5 text-[12.5px] text-muted transition hover:text-ink lg:hidden"
               >
                 <svg
                   className="size-4"

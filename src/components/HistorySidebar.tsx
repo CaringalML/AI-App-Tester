@@ -10,10 +10,17 @@ interface Props {
   onOpen: (id: string) => void;
   onNewTest: () => void;
   onDelete: (id: string) => Promise<void>;
-  onClose: () => void;
-  /** rail: collapses the desktop sidebar. drawer: dismisses the overlay on small screens. */
-  variant: 'rail' | 'drawer';
+  /**
+   * expanded / collapsed: the desktop rail, full list or icon strip.
+   * drawer: the overlay on small screens, which is dismissed rather than collapsed.
+   */
+  mode: 'expanded' | 'collapsed' | 'drawer';
+  /** Collapses or expands the rail; closes the drawer. */
+  onToggle: () => void;
 }
+
+const SHORTCUT =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B';
 
 function splitUrl(url: string): { host: string; path: string } {
   try {
@@ -41,8 +48,8 @@ export function HistorySidebar({
   onOpen,
   onNewTest,
   onDelete,
-  onClose,
-  variant,
+  mode,
+  onToggle,
 }: Props) {
   const [confirming, setConfirming] = useState<string | 'all' | null>(null);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
@@ -75,43 +82,130 @@ export function HistorySidebar({
     }
   }
 
-  return (
-    <aside className="flex h-full w-full flex-col border-r border-line bg-surface">
-      <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5">
-        <div>
-          <h2 className="text-[13.5px] font-semibold tracking-tight">Test history</h2>
-          <p className="text-[11.5px] text-faint">Saved in this browser</p>
-        </div>
-        <div className="flex items-center gap-1.5">
+  const collapsed = mode === 'collapsed';
+
+  /*
+   * The toggle sits in the same place in both states, top-left of the rail,
+   * the way modern app sidebars behave. The drawer on small screens has a
+   * close button instead, since it is dismissed rather than collapsed.
+   */
+  const toggle =
+    mode === 'drawer' ? null : (
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-expanded={!collapsed}
+        title={`${collapsed ? 'Expand' : 'Collapse'} sidebar (${SHORTCUT})`}
+        className="grid size-9 flex-none place-items-center rounded-lg text-muted transition hover:bg-raised hover:text-ink"
+      >
+        <svg className="size-4.5" {...ICON}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16" />
+        </svg>
+      </button>
+    );
+
+  if (collapsed) {
+    return (
+      <aside className="flex h-full w-full flex-col border-r border-line bg-surface">
+        <header className="flex h-15 flex-none items-center border-b border-line px-2.5">
+          {toggle}
+        </header>
+        <div className="flex flex-none flex-col items-start gap-1 border-b border-line px-2.5 py-2">
           <button
             type="button"
             onClick={onNewTest}
-            className="flex items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[12px] text-muted transition hover:border-accent/40 hover:text-ink"
+            aria-label="New test"
+            title="New test"
+            className="grid size-9 place-items-center rounded-lg text-muted transition hover:bg-raised hover:text-ink"
           >
-            <svg className="size-3.5" {...ICON}>
+            <svg className="size-4.5" {...ICON}>
               <path d="M12 5v14M5 12h14" />
             </svg>
-            New
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={variant === 'rail' ? 'Hide history' : 'Close history'}
-            title={variant === 'rail' ? 'Hide history' : 'Close'}
-            className="grid size-7 place-items-center rounded-md text-muted transition hover:bg-raised hover:text-ink"
-          >
-            {variant === 'rail' ? (
-              <svg className="size-4" {...ICON}>
-                <rect x="3" y="4" width="18" height="16" rx="2" />
-                <path d="M9 4v16M15 10l-2 2 2 2" />
-              </svg>
-            ) : (
-              <svg className="size-4" {...ICON}>
-                <path d="M6 6l12 12M18 6L6 18" />
-              </svg>
-            )}
           </button>
         </div>
+        <ol className="flex min-h-0 flex-1 flex-col items-start gap-1.5 overflow-y-auto px-2.5 py-2">
+          {entries.map((entry) => {
+            const summary = summaries[entry.id];
+            const { host, path } = splitUrl(summary?.targetUrl ?? entry.targetUrl);
+            const running = summary?.status === 'running' || summary?.status === 'queued';
+            const active = entry.id === activeId;
+            return (
+              <li key={entry.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpen(entry.id)}
+                  aria-label={`Open the test of ${host}${path}`}
+                  title={`${host}${path}${
+                    summary && !running
+                      ? ` · ${summary.bugs} broken, ${summary.improvements} to improve`
+                      : running
+                        ? ' · running'
+                        : ''
+                  }`}
+                  className={`relative grid size-9 place-items-center overflow-hidden rounded-lg border bg-bg transition ${
+                    active
+                      ? 'border-accent ring-2 ring-accent/30'
+                      : 'border-line hover:border-line-strong'
+                  }`}
+                >
+                  {summary?.thumbnailUrl ? (
+                    <img
+                      src={summary.thumbnailUrl}
+                      alt=""
+                      loading="lazy"
+                      className="size-full object-cover object-top"
+                    />
+                  ) : (
+                    <span className="font-mono text-[12px] text-faint uppercase">
+                      {host.charAt(0)}
+                    </span>
+                  )}
+                  {running ? (
+                    <span className="absolute top-0.5 right-0.5 size-2 animate-pulse rounded-full bg-accent ring-2 ring-surface" />
+                  ) : summary?.bugs ? (
+                    <span className="absolute top-0.5 right-0.5 size-2 rounded-full bg-critical ring-2 ring-surface" />
+                  ) : null}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="flex h-full w-full flex-col border-r border-line bg-surface">
+      <header className="flex h-15 flex-none items-center gap-1.5 border-b border-line px-2.5">
+        {toggle}
+        <div className={`min-w-0 flex-1 ${mode === 'drawer' ? 'pl-1.5' : ''}`}>
+          <h2 className="text-[13.5px] font-semibold tracking-tight">Test history</h2>
+          <p className="text-[11.5px] text-faint">Saved in this browser</p>
+        </div>
+        <button
+          type="button"
+          onClick={onNewTest}
+          className="flex flex-none items-center gap-1 rounded-md border border-line-strong px-2 py-1 text-[12px] text-muted transition hover:border-accent/40 hover:text-ink"
+        >
+          <svg className="size-3.5" {...ICON}>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          New
+        </button>
+        {mode === 'drawer' ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label="Close history"
+            className="grid size-8 flex-none place-items-center rounded-md text-muted transition hover:bg-raised hover:text-ink"
+          >
+            <svg className="size-4" {...ICON}>
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        ) : null}
       </header>
 
       <ol className="min-h-0 flex-1 overflow-y-auto p-2">
