@@ -12,6 +12,8 @@ login, search, checkout, forms, navigation) and exercise the ones that exist.
 - Try realistic unusual input where it matters: empty required fields, invalid email \
 formats, very long text, leading spaces, special characters, double submission, the back \
 button after submitting.
+- Someone may be watching the run live. Give every action a short, plain "why" that \
+says what you are checking, so the run reads like a narrated test.
 - Observe what actually happens after each action. Every action result lists the signals \
 it produced (console errors, failed requests, dialogs, URL changes) with ids.
 - Look for user-facing problems too: missing validation messages, confusing labels, dead \

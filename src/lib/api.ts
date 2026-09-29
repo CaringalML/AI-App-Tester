@@ -6,7 +6,7 @@
  * scan, get an id back immediately, then poll its record and stream the
  * progress log into the UI until it finishes.
  */
-import type { ScanOptions, ScanResult } from './types';
+import type { ScanOptions, ScanResult, TimelineStep } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL?.replace(/\/+$/, '');
 
@@ -25,6 +25,12 @@ interface ApiScan extends Omit<ScanResult, 'pagesVisited'> {
 
 export class ScanError extends Error {}
 
+/** What the UI can show while a scan is still running. */
+export interface LiveUpdate {
+  progress: string[];
+  timeline: TimelineStep[];
+}
+
 async function readError(response: Response): Promise<string> {
   try {
     const body = await response.json();
@@ -41,7 +47,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export async function runLiveScan(
   targetUrl: string,
   options: ScanOptions,
-  onProgress: (messages: string[]) => void,
+  onUpdate: (update: LiveUpdate) => void,
 ): Promise<ScanResult> {
   let started: Response;
   try {
@@ -68,7 +74,10 @@ export async function runLiveScan(
     if (!response.ok) throw new ScanError(await readError(response));
 
     const scan = (await response.json()) as ApiScan;
-    onProgress(scan.progress.map((event) => event.message));
+    onUpdate({
+      progress: scan.progress.map((event) => event.message),
+      timeline: scan.timeline ?? [],
+    });
 
     if (scan.status === 'error' && scan.findings.length === 0) {
       throw new ScanError(scan.error ?? 'The scan failed.');

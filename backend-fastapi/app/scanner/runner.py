@@ -23,7 +23,15 @@ from playwright.async_api import Error as PlaywrightError
 
 from ..artifacts import ArtifactStore
 from ..config import Settings
-from ..models import SEVERITY_ORDER, Finding, ProgressEvent, Scan, ScanOptions, utcnow
+from ..models import (
+    SEVERITY_ORDER,
+    Finding,
+    ProgressEvent,
+    Scan,
+    ScanOptions,
+    TimelineStep,
+    utcnow,
+)
 from ..security import TargetGuard, TargetNotAllowedError
 from ..store import ScanStore
 from .agent import ExplorationAgent, brief_automated
@@ -41,11 +49,17 @@ class ScanFailedError(RuntimeError):
 
 
 class Reporter:
-    """Appends progress and persists the scan so the frontend can poll it."""
+    """Records the run as it happens and persists it so the frontend can follow along.
 
-    def __init__(self, scan: Scan, store: ScanStore) -> None:
+    Every call becomes a timeline step in the command log. Steps can carry a
+    screenshot of the page after the action and, for element actions, one from
+    just before with the target's position, so the UI can replay the run.
+    """
+
+    def __init__(self, scan: Scan, store: ScanStore, artifacts: ArtifactStore) -> None:
         self.scan = scan
         self.store = store
+        self.artifacts = artifacts
         self._lock = asyncio.Lock()
 
     async def save(self) -> None:
@@ -53,10 +67,61 @@ class Reporter:
             self.scan.updated_at = utcnow()
             await self.store.put(self.scan)
 
-    async def progress(self, message: str, kind: str = "info") -> None:
-        self.scan.progress.append(ProgressEvent(at=utcnow(), message=message, kind=kind))
-        log.info("scan %s: %s", self.scan.id, message)
+    async def _store_image(self, name: str, data: bytes | None) -> str | None:
+        if data is None:
+            return None
+        key = f"{self.scan.id}/steps/{name}.jpg"
+        try:
+            await self.artifacts.save_jpeg(key, data)
+        except Exception as exc:  # a missing frame should never fail the scan
+            log.warning("could not store %s: %s", key, exc)
+            return None
+        return key
+
+    async def step(
+        self,
+        kind: str,
+        label: str,
+        *,
+        why: str | None = None,
+        url: str | None = None,
+        shot: bytes | None = None,
+        before: bytes | None = None,
+        box: dict[str, float] | None = None,
+        status: str = "ok",
+        action_id: str | None = None,
+        finding_id: str | None = None,
+        signals: int = 0,
+        shot_key: str | None = None,
+    ) -> None:
+        index = len(self.scan.timeline) + 1
+        self.scan.timeline.append(
+            TimelineStep(
+                index=index,
+                at=utcnow(),
+                kind=kind,
+                label=label,
+                why=why,
+                url=url,
+                status=status,
+                action_id=action_id,
+                finding_id=finding_id,
+                signals=signals,
+                box=box,
+                screenshot_key=shot_key or await self._store_image(f"{index:03d}", shot),
+                before_key=await self._store_image(f"{index:03d}-before", before),
+            )
+        )
+        progress_kind = {"finding": "finding", "warning": "warning"}.get(status, "info")
+        if kind not in ("stage", "visit"):
+            progress_kind = "finding" if kind == "finding" else "action"
+        self.scan.progress.append(ProgressEvent(at=utcnow(), message=label, kind=progress_kind))
+        log.info("scan %s: [%s] %s", self.scan.id, kind, label)
         await self.save()
+
+    async def progress(self, message: str, kind: str = "info") -> None:
+        status = {"warning": "warning", "finding": "finding"}.get(kind, "info")
+        await self.step("stage", message, status=status)
 
 
 def _apply_options(findings: list[Finding], options: ScanOptions) -> list[Finding]:
@@ -111,7 +176,7 @@ class ScanRunner:
 
     async def _run(self, scan: Scan) -> None:
         settings = self.settings
-        reporter = Reporter(scan, self.store)
+        reporter = Reporter(scan, self.store, self.artifacts)
         collector = FindingCollector()
         usage = UsageTracker(scan.model)
         scan.status = "running"
@@ -179,10 +244,14 @@ class ScanRunner:
             facts = observations.of_kind("page-facts")
             load_ms = (facts[0].data.get("timing") or {}).get("load") if facts else None
             loaded = f"Page loaded in {load_ms / 1000:.1f}s" if load_ms else "Page loaded"
-            if status and status >= 400:
-                await reporter.progress(f"The page answered with HTTP {status}", "warning")
-            else:
-                await reporter.progress(loaded)
+            failed_status = bool(status and status >= 400)
+            await reporter.step(
+                "visit",
+                f"The page answered with HTTP {status}" if failed_status else loaded,
+                url=start_url,
+                shot=await _safe_shot(session),
+                status="warning" if failed_status else "ok",
+            )
 
             # Deterministic evidence first: it is cheap, fast, and cannot hallucinate.
             visited = {page_key(u) for u in session.visited}
@@ -190,11 +259,16 @@ class ScanRunner:
             for url in others[: options.max_pages - 1]:
                 if time.monotonic() > deadline - 90:
                     break
-                await reporter.progress(f"Checking {page_key(url)}")
                 try:
                     await session.open(url)
+                    await reporter.step(
+                        "visit", f"Checked {page_key(url)}", url=url, shot=await _safe_shot(session)
+                    )
                 except PlaywrightError as exc:
                     observations.add("request-failed", url, f"{url} failed to load: {exc}", url=url)
+                    await reporter.step(
+                        "visit", f"{page_key(url)} failed to load", url=url, status="failed"
+                    )
 
             if session.links:
                 await reporter.progress("Following links to find dead ends")
@@ -216,13 +290,18 @@ class ScanRunner:
                 collector=collector,
                 artifacts=self.artifacts,
                 usage=usage,
-                progress=reporter.progress,
+                recorder=reporter,
                 scan_id=scan.id,
                 deadline=deadline,
             )
             try:
                 await session.open(start_url)
-                await reporter.progress("Handing the browser to Claude to try the main flows")
+                await reporter.step(
+                    "stage",
+                    "Handing the browser to Claude to try the main flows",
+                    url=start_url,
+                    shot=await _safe_shot(session),
+                )
                 await agent.run(brief_automated(collector.items))
             except anthropic.APIError as exc:
                 log.warning("agent stopped: %s", exc)
@@ -258,6 +337,13 @@ class ScanRunner:
                 f"Filtered out {len(suppressed)} finding(s) as duplicates or likely noise"
             )
         await reporter.progress("Report ready")
+
+
+async def _safe_shot(session: BrowserSession) -> bytes | None:
+    try:
+        return await session.screenshot()
+    except PlaywrightError:
+        return None
 
 
 def _api_reason(exc: anthropic.APIError) -> str:

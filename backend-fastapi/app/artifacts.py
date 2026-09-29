@@ -1,6 +1,7 @@
 """Evidence screenshots: S3 with short-lived presigned links in AWS, local disk in dev."""
 
 import asyncio
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -26,14 +27,18 @@ class LocalArtifactStore:
 
 
 class S3ArtifactStore:
-    # Links are minted per read, so they never outlive the task role's session credentials.
+    # Links are minted on read and cached. The cache matters: the UI polls every
+    # second or two, and a fresh signature each time would make every frame in the
+    # replay reload and flicker. Reusing a link until near expiry keeps URLs stable.
     PRESIGN_SECONDS = 3600
+    REUSE_MARGIN_SECONDS = 600
 
     def __init__(self, bucket: str, region: str) -> None:
         import boto3
         from botocore.config import Config
 
         self.bucket = bucket
+        self._links: dict[str, tuple[str, float]] = {}
         self._s3 = boto3.client("s3", region_name=region, config=Config(signature_version="s3v4"))
 
     async def save_jpeg(self, key: str, data: bytes) -> None:
@@ -47,9 +52,17 @@ class S3ArtifactStore:
         )
 
     async def url_for(self, key: str) -> str:
-        return await asyncio.to_thread(
+        cached = self._links.get(key)
+        now = time.monotonic()
+        if cached and cached[1] - now > self.REUSE_MARGIN_SECONDS:
+            return cached[0]
+        url = await asyncio.to_thread(
             self._s3.generate_presigned_url,
             "get_object",
             Params={"Bucket": self.bucket, "Key": key},
             ExpiresIn=self.PRESIGN_SECONDS,
         )
+        if len(self._links) > 5000:  # bounded; scans expire after a week anyway
+            self._links.clear()
+        self._links[key] = (url, now + self.PRESIGN_SECONDS)
+        return url

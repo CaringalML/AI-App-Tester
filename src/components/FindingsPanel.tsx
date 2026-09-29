@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
-import type { Category, ScanPhase, ScanResult } from '../lib/types';
+import { useMemo, useRef, useState } from 'react';
+import type { Category, Finding, ScanPhase, ScanResult, TimelineStep } from '../lib/types';
 import { SEVERITY_ORDER } from '../lib/types';
 import { reportUrl } from '../lib/api';
 import { FindingCard } from './FindingCard';
+import { TestRunner } from './TestRunner';
 
 /** A real scan produces 30+ steps; the log shows the most recent ones. */
 const VISIBLE_STEPS = 12;
@@ -12,14 +13,35 @@ interface Props {
   progress: string[];
   result: ScanResult | null;
   error: string | null;
+  /** Live command log while running; the finished scan carries its own. */
+  timeline: TimelineStep[];
+  targetUrl?: string;
 }
 
 type Filter = 'all' | Category;
 
 const PANEL = 'rounded-[14px] border border-line bg-surface';
+/** Idle, error and placeholder states stay form-width; the runner and results use the full width. */
+const NARROW = 'mx-auto w-full max-w-193';
 
-export function FindingsPanel({ phase, progress, result, error }: Props) {
+export function FindingsPanel({ phase, progress, result, error, timeline, targetUrl }: Props) {
   const [filter, setFilter] = useState<Filter>('all');
+  const [pinned, setPinned] = useState<number | null>(null);
+  const runnerRef = useRef<HTMLDivElement>(null);
+  const steps = result?.timeline?.length ? result.timeline : timeline;
+
+  /** The replay step that shows a finding: where it was reported, else its first cited action. */
+  function stepFor(finding: Finding): TimelineStep | undefined {
+    return (
+      steps.find((s) => s.findingId === finding.id) ??
+      steps.find((s) => s.actionId && finding.evidenceIds?.includes(s.actionId))
+    );
+  }
+
+  function showInReplay(step: TimelineStep) {
+    setPinned(step.index);
+    runnerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const sorted = useMemo(() => {
     if (!result) return [];
@@ -34,7 +56,7 @@ export function FindingsPanel({ phase, progress, result, error }: Props) {
 
   if (phase === 'idle') {
     return (
-      <div className={`${PANEL} px-7 py-11 text-center`}>
+      <div className={`${PANEL} ${NARROW} px-7 py-11 text-center`}>
         <div className="mb-4.5 flex h-8.5 items-end justify-center gap-1.5" aria-hidden="true">
           <span className="h-3.5 w-1.5 animate-bob rounded-[3px] bg-line-strong" />
           <span className="h-6.5 w-1.5 animate-bob rounded-[3px] bg-line-strong [animation-delay:0.22s]" />
@@ -52,7 +74,7 @@ export function FindingsPanel({ phase, progress, result, error }: Props) {
 
   if (phase === 'error') {
     return (
-      <div className={`${PANEL} p-7`}>
+      <div className={`${PANEL} ${NARROW} p-7`}>
         <h3 className="text-[15px] font-semibold tracking-tight text-critical">
           The test could not run
         </h3>
@@ -61,9 +83,15 @@ export function FindingsPanel({ phase, progress, result, error }: Props) {
     );
   }
 
+  if (phase === 'running' && steps.length) {
+    return (
+      <TestRunner steps={steps} live targetUrl={targetUrl} pinned={pinned} onPin={setPinned} />
+    );
+  }
+
   if (phase === 'running') {
     return (
-      <div className={`${PANEL} px-6.5 py-6`}>
+      <div className={`${PANEL} ${NARROW} px-6.5 py-6`}>
         <div className="flex items-center gap-2.5">
           <span className="size-2 animate-ring rounded-full bg-accent" aria-hidden="true" />
           <h3 className="text-[15px] font-semibold tracking-tight">Working through the app</h3>
@@ -89,89 +117,111 @@ export function FindingsPanel({ phase, progress, result, error }: Props) {
   }
 
   return (
-    <div className={PANEL}>
-      <header className="flex flex-wrap items-center justify-between gap-3.5 border-b border-line px-5 py-4.5">
-        <div>
-          <h3 className="text-[15px] font-semibold tracking-tight">
-            {sorted.length} finding{sorted.length === 1 ? '' : 's'}
-          </h3>
-          <p className="mt-0.5 text-[12.5px] break-all text-faint">
-            {result ? runStats(result) : null}
-          </p>
+    <div className="grid gap-5">
+      {steps.length ? (
+        <div ref={runnerRef} className="scroll-mt-6">
+          <TestRunner
+            steps={steps}
+            live={false}
+            targetUrl={result?.targetUrl ?? targetUrl}
+            pinned={pinned}
+            onPin={setPinned}
+          />
         </div>
-
-        <div
-          className="flex gap-1 rounded-[9px] border border-line bg-raised p-0.75"
-          role="group"
-          aria-label="Filter findings"
-        >
-          {(
-            [
-              ['all', `All ${sorted.length}`],
-              ['bug', `Broken ${bugCount}`],
-              ['improvement', `Improvements ${improvementCount}`],
-            ] as Array<[Filter, string]>
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={`rounded-[7px] px-2.75 py-1.25 text-[12.5px] whitespace-nowrap transition ${
-                filter === key
-                  ? 'bg-surface text-ink shadow-[var(--shadow-panel)]'
-                  : 'text-muted hover:text-ink'
-              }`}
-              aria-pressed={filter === key}
-              onClick={() => setFilter(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </header>
-
-      {result?.summary || result?.notes?.length || result?.id ? (
-        <div className="grid gap-3 border-b border-line px-5 py-4">
-          {result.summary ? (
-            <p className="text-[14px] leading-relaxed text-ink">{result.summary}</p>
-          ) : null}
-          {result.notes?.map((note) => (
-            <p key={note} className="text-[12.5px] text-medium">
-              {note}
+      ) : null}
+      <div className={PANEL}>
+        <header className="flex flex-wrap items-center justify-between gap-3.5 border-b border-line px-5 py-4.5">
+          <div>
+            <h3 className="text-[15px] font-semibold tracking-tight">
+              {sorted.length} finding{sorted.length === 1 ? '' : 's'}
+            </h3>
+            <p className="mt-0.5 text-[12.5px] break-all text-faint">
+              {result ? runStats(result) : null}
             </p>
-          ))}
-          {result.id ? <ReportActions scanId={result.id} /> : null}
-        </div>
-      ) : null}
+          </div>
 
-      <div className="grid gap-2.5 p-3.5">
-        {visible.length === 0 ? (
-          <p className="p-6.5 text-center text-[13.5px] text-faint">Nothing in this category.</p>
-        ) : (
-          visible.map((finding) => <FindingCard key={finding.id} finding={finding} />)
-        )}
-      </div>
-
-      {result?.suppressed?.length ? (
-        <details className="border-t border-line px-5 py-4 text-[13px]">
-          <summary className="cursor-pointer text-muted">
-            Filtered out as duplicates or likely noise ({result.suppressed.length})
-          </summary>
-          <ul className="mt-3 grid gap-2">
-            {result.suppressed.map(({ finding, reason }) => (
-              <li key={finding.id} className="text-faint">
-                <span className="text-muted">{finding.title}</span>: {reason}
-              </li>
+          <div
+            className="flex gap-1 rounded-[9px] border border-line bg-raised p-0.75"
+            role="group"
+            aria-label="Filter findings"
+          >
+            {(
+              [
+                ['all', `All ${sorted.length}`],
+                ['bug', `Broken ${bugCount}`],
+                ['improvement', `Improvements ${improvementCount}`],
+              ] as Array<[Filter, string]>
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`rounded-[7px] px-2.75 py-1.25 text-[12.5px] whitespace-nowrap transition ${
+                  filter === key
+                    ? 'bg-surface text-ink shadow-[var(--shadow-panel)]'
+                    : 'text-muted hover:text-ink'
+                }`}
+                aria-pressed={filter === key}
+                onClick={() => setFilter(key)}
+              >
+                {label}
+              </button>
             ))}
-          </ul>
-        </details>
-      ) : null}
+          </div>
+        </header>
+
+        {result?.summary || result?.notes?.length || result?.id ? (
+          <div className="grid gap-3 border-b border-line px-5 py-4">
+            {result.summary ? (
+              <p className="text-[14px] leading-relaxed text-ink">{result.summary}</p>
+            ) : null}
+            {result.notes?.map((note) => (
+              <p key={note} className="text-[12.5px] text-medium">
+                {note}
+              </p>
+            ))}
+            {result.id ? <ReportActions scanId={result.id} /> : null}
+          </div>
+        ) : null}
+
+        <div className="grid gap-2.5 p-3.5">
+          {visible.length === 0 ? (
+            <p className="p-6.5 text-center text-[13.5px] text-faint">Nothing in this category.</p>
+          ) : (
+            visible.map((finding) => {
+              const step = stepFor(finding);
+              return (
+                <FindingCard
+                  key={finding.id}
+                  finding={finding}
+                  onShowInReplay={step ? () => showInReplay(step) : undefined}
+                />
+              );
+            })
+          )}
+        </div>
+
+        {result?.suppressed?.length ? (
+          <details className="border-t border-line px-5 py-4 text-[13px]">
+            <summary className="cursor-pointer text-muted">
+              Filtered out as duplicates or likely noise ({result.suppressed.length})
+            </summary>
+            <ul className="mt-3 grid gap-2">
+              {result.suppressed.map(({ finding, reason }) => (
+                <li key={finding.id} className="text-faint">
+                  <span className="text-muted">{finding.title}</span>: {reason}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+      </div>
     </div>
   );
 }
 
 function runStats(result: ScanResult): string {
   const parts = [`${result.pagesVisited} page${result.pagesVisited === 1 ? '' : 's'}`];
-  if (result.agentSteps) parts.push(`${result.agentSteps} browser actions by Claude`);
+  if (result.agentSteps) parts.push(`${result.agentSteps} tool calls by Claude`);
   const started = Date.parse(result.startedAt);
   const finished = Date.parse(result.finishedAt);
   if (started && finished) parts.push(`${Math.round((finished - started) / 1000)}s`);

@@ -34,7 +34,14 @@ const SEVERITY_BADGE: Record<Severity, string> = {
 const BADGE_BASE =
   'rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize tracking-[0.01em]';
 
-export function FindingCard({ finding }: { finding: Finding }) {
+export function FindingCard({
+  finding,
+  onShowInReplay,
+}: {
+  finding: Finding;
+  /** Present when the replay has a step that shows this finding happening. */
+  onShowInReplay?: () => void;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -160,9 +167,18 @@ export function FindingCard({ finding }: { finding: Finding }) {
             <p className="text-sm text-muted">{finding.suggestion}</p>
           </section>
 
-          <p className="rounded-lg border border-line bg-bg px-3 py-2.25 text-[12.5px] text-faint">
-            {CONFIDENCE_NOTE[finding.confidence]}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-bg px-3 py-2.25 text-[12.5px] text-faint">
+            <span>{CONFIDENCE_NOTE[finding.confidence]}</span>
+            {onShowInReplay ? (
+              <button
+                type="button"
+                onClick={onShowInReplay}
+                className="rounded-md border border-accent/40 px-2.5 py-1 text-[12px] text-accent transition hover:bg-accent/10"
+              >
+                Show in replay
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </article>

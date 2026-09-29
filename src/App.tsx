@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScanForm } from './components/ScanForm';
 import { FindingsPanel } from './components/FindingsPanel';
 import { ThemeToggle } from './components/ThemeToggle';
 import { DEFAULT_OPTIONS } from './lib/types';
-import type { ScanOptions, ScanPhase, ScanResult } from './lib/types';
+import type { ScanOptions, ScanPhase, ScanResult, TimelineStep } from './lib/types';
 import { runMockScan } from './lib/mockScan';
 import { isLiveApi, runLiveScan } from './lib/api';
 
@@ -13,17 +13,30 @@ export default function App() {
   const [progress, setProgress] = useState<string[]>([]);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<TimelineStep[]>([]);
+  const [target, setTarget] = useState<string>('');
+  const resultsRef = useRef<HTMLElement>(null);
+
+  // Bring the live runner into view as soon as a scan starts.
+  useEffect(() => {
+    if (phase === 'running') resultsRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [phase]);
 
   async function handleScan(url: string) {
     setPhase('running');
     setProgress([]);
+    setTimeline([]);
+    setTarget(url);
     setResult(null);
     setError(null);
 
     try {
       // Builds without VITE_API_URL fall back to placeholder data, clearly labelled below.
       const scan = isLiveApi
-        ? await runLiveScan(url, options, setProgress)
+        ? await runLiveScan(url, options, (update) => {
+            setProgress(update.progress);
+            setTimeline(update.timeline);
+          })
         : await runMockScan(url, options, (message) => setProgress((prev) => [...prev, message]));
       setResult(scan);
       setPhase('done');
@@ -76,9 +89,22 @@ export default function App() {
           onSubmit={handleScan}
           busy={phase === 'running'}
         />
-
-        <FindingsPanel phase={phase} progress={progress} result={result} error={error} />
       </main>
+
+      {/* Wider than the form: the runner needs room for a log beside a real viewport. */}
+      <section
+        ref={resultsRef}
+        className="relative mx-auto -mt-8 w-full max-w-300 scroll-mt-4 px-6 pb-16"
+      >
+        <FindingsPanel
+          phase={phase}
+          progress={progress}
+          result={result}
+          error={error}
+          timeline={timeline}
+          targetUrl={target}
+        />
+      </section>
 
       <footer className="relative flex flex-wrap items-center justify-center gap-2.5 px-6 pt-4 pb-8 text-center text-[12.5px] text-faint">
         {isLiveApi ? (
@@ -92,8 +118,7 @@ export default function App() {
               Placeholder results
             </span>
             <span>
-              This build is not connected to the scan API. Findings shown are fixed sample data
-              from
+              This build is not connected to the scan API. Findings shown are fixed sample data from
               <code className="ml-1 font-mono text-[0.86em] text-muted">src/lib/mockScan.ts</code>.
             </span>
           </>

@@ -88,6 +88,14 @@ class _FakeSession:
         return b"jpeg"
 
 
+class _FakeRecorder:
+    def __init__(self) -> None:
+        self.steps: list[tuple[str, str, dict]] = []
+
+    async def step(self, kind: str, label: str, **fields: object) -> None:
+        self.steps.append((kind, label, fields))
+
+
 class _FakeArtifacts:
     def __init__(self) -> None:
         self.saved: dict[str, bytes] = {}
@@ -100,9 +108,6 @@ class _FakeArtifacts:
 
 
 def _agent(observations: ObservationLog, collector: FindingCollector) -> ExplorationAgent:
-    async def progress(_message: str, _kind: str = "info") -> None:
-        return None
-
     return ExplorationAgent(
         client=None,
         settings=Settings(),
@@ -111,7 +116,7 @@ def _agent(observations: ObservationLog, collector: FindingCollector) -> Explora
         collector=collector,
         artifacts=_FakeArtifacts(),
         usage=UsageTracker("claude-opus-5-5"),
-        progress=progress,
+        recorder=_FakeRecorder(),
         scan_id="abc",
         deadline=0,
     )

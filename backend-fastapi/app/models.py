@@ -82,6 +82,50 @@ class ProgressEvent(ApiModel):
     kind: Literal["info", "action", "finding", "warning"] = "info"
 
 
+StepKind = Literal[
+    "stage",
+    "visit",
+    "click",
+    "type",
+    "select",
+    "press",
+    "navigate",
+    "back",
+    "look",
+    "read",
+    "finding",
+]
+
+
+class Box(ApiModel):
+    """Element position as fractions of the viewport, so the UI can outline it at any size."""
+
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+class TimelineStep(ApiModel):
+    """One entry in the Cypress-style command log, with the page as it looked at that moment."""
+
+    index: int
+    at: datetime
+    kind: StepKind
+    label: str
+    why: str | None = None
+    url: str | None = None
+    status: Literal["ok", "failed", "info", "warning", "finding"] = "ok"
+    action_id: str | None = None
+    finding_id: str | None = None
+    signals: int = 0
+    box: Box | None = None
+    screenshot_key: str | None = None
+    before_key: str | None = None
+    screenshot_url: str | None = None
+    before_url: str | None = None
+
+
 class Usage(ApiModel):
     requests: int = 0
     input_tokens: int = 0
@@ -102,6 +146,7 @@ class Scan(ApiModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     progress: list[ProgressEvent] = Field(default_factory=list)
+    timeline: list[TimelineStep] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     suppressed: list[SuppressedFinding] = Field(default_factory=list)
     summary: str | None = None

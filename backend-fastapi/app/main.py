@@ -149,6 +149,11 @@ def create_app(
         for finding in scan.findings:
             if finding.screenshot_key:
                 finding.screenshot_url = await artifacts.url_for(finding.screenshot_key)
+        for step in scan.timeline:
+            if step.screenshot_key:
+                step.screenshot_url = await artifacts.url_for(step.screenshot_key)
+            if step.before_key:
+                step.before_url = await artifacts.url_for(step.before_key)
         return scan
 
     @app.get("/scans/{scan_id}", response_model=Scan, tags=["scans"])

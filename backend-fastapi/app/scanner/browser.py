@@ -9,6 +9,7 @@ report what changed, so its findings can cite concrete action ids.
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -111,6 +112,20 @@ async () => {
   }));
 }
 """
+
+
+@dataclass
+class ActionOutcome:
+    """What an agent action did: its ledger id, a description, and where it ended up."""
+
+    id: str
+    text: str
+    failed: bool
+    url: str
+    signals: int = 0
+
+    def for_model(self) -> str:
+        return f"{self.id}: {self.text}"
 
 
 def site_key(url: str) -> str:
@@ -374,8 +389,29 @@ class BrowserSession:
             )
         return self.page.locator(f'[data-aat-ref="{ref}"]').first
 
-    async def perform(self, description: str, action) -> str:  # noqa: ANN001
-        """Run an action, then describe what changed. Returns the outcome text."""
+    async def target_box(self, ref: str) -> dict[str, float] | None:
+        """Scroll the element into view and return its box as fractions of the viewport.
+
+        Fractions, not pixels, so the UI can outline it on a screenshot at any size.
+        """
+        locator = self._locator(ref)
+        try:
+            await locator.scroll_into_view_if_needed(timeout=2_000)
+            box = await locator.bounding_box(timeout=2_000)
+        except PlaywrightError:
+            return None
+        if not box:
+            return None
+        width, height = VIEWPORT["width"], VIEWPORT["height"]
+        return {
+            "x": max(0.0, box["x"] / width),
+            "y": max(0.0, box["y"] / height),
+            "w": min(1.0, box["width"] / width),
+            "h": min(1.0, box["height"] / height),
+        }
+
+    async def perform(self, description: str, action) -> ActionOutcome:  # noqa: ANN001
+        """Run an action, then describe what changed."""
         assert self.page is not None
         before_url = self.page.url
         mark = len(self.log)
@@ -409,30 +445,30 @@ class BrowserSession:
             parts.append("no errors observed")
         outcome = " | ".join(parts)
         action_obs = self.log.add("action", after_url, outcome, failed=bool(error))
-        return f"{action_obs.id}: {outcome}"
+        return ActionOutcome(action_obs.id, outcome, bool(error), after_url, len(signals))
 
-    async def click(self, ref: str, label: str) -> str:
+    async def click(self, ref: str, label: str) -> ActionOutcome:
         return await self.perform(
             f'clicked {ref} "{label}"', lambda: self._locator(ref).click(timeout=ACTION_TIMEOUT_MS)
         )
 
-    async def fill(self, ref: str, label: str, text: str) -> str:
+    async def fill(self, ref: str, label: str, text: str) -> ActionOutcome:
         return await self.perform(
             f'typed "{text[:60]}" into {ref} "{label}"',
             lambda: self._locator(ref).fill(text, timeout=ACTION_TIMEOUT_MS),
         )
 
-    async def select(self, ref: str, label: str, option: str) -> str:
+    async def select(self, ref: str, label: str, option: str) -> ActionOutcome:
         return await self.perform(
             f'selected "{option}" in {ref} "{label}"',
             lambda: self._locator(ref).select_option(option, timeout=ACTION_TIMEOUT_MS),
         )
 
-    async def press(self, key: str) -> str:
+    async def press(self, key: str) -> ActionOutcome:
         assert self.page is not None
         return await self.perform(f"pressed {key}", lambda: self.page.keyboard.press(key))
 
-    async def navigate(self, target: str) -> str:
+    async def navigate(self, target: str) -> ActionOutcome:
         assert self.page is not None
         url = urljoin(self.page.url, target)
         if not self.same_site(url):
@@ -442,7 +478,7 @@ class BrowserSession:
             lambda: self.page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS),
         )
 
-    async def back(self) -> str:
+    async def back(self) -> ActionOutcome:
         assert self.page is not None
         return await self.perform(
             "went back",

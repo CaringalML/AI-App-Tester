@@ -57,6 +57,47 @@ export interface SuppressedFinding {
   reason: string;
 }
 
+export type StepKind =
+  | 'stage'
+  | 'visit'
+  | 'click'
+  | 'type'
+  | 'select'
+  | 'press'
+  | 'navigate'
+  | 'back'
+  | 'look'
+  | 'read'
+  | 'finding';
+
+/** Element position as fractions of the viewport, measured just before the action. */
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** One row of the Cypress-style command log, with the page as it looked at that moment. */
+export interface TimelineStep {
+  index: number;
+  at: string;
+  kind: StepKind;
+  label: string;
+  /** Claude's one-line reason for the action, written for whoever is watching. */
+  why?: string | null;
+  url?: string | null;
+  status: 'ok' | 'failed' | 'info' | 'warning' | 'finding';
+  actionId?: string | null;
+  findingId?: string | null;
+  signals: number;
+  box?: Box | null;
+  /** The page after the step. */
+  screenshotUrl?: string | null;
+  /** The page just before an element action, which is where `box` applies. */
+  beforeUrl?: string | null;
+}
+
 export interface Usage {
   requests: number;
   inputTokens: number;
@@ -82,6 +123,7 @@ export interface ScanResult {
   finishedAt: string;
   pagesVisited: number;
   findings: Finding[];
+  timeline?: TimelineStep[];
   summary?: string | null;
   suppressed?: SuppressedFinding[];
   notes?: string[];

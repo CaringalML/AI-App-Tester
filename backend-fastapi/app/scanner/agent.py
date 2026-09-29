@@ -16,13 +16,13 @@ import base64
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Protocol
 
 import anthropic
 
 from ..artifacts import ArtifactStore
 from ..config import Settings
-from .browser import BrowserSession
+from .browser import ActionOutcome, BrowserSession
 from .findings import FindingCollector
 from .observations import ObservationLog
 from .prompts import AGENT_SYSTEM
@@ -30,7 +30,12 @@ from .usage import UsageTracker
 
 log = logging.getLogger(__name__)
 
-Progress = Callable[[str, str], Awaitable[None]]
+
+class Recorder(Protocol):
+    """Writes steps to the run's timeline; implemented by runner.Reporter."""
+
+    async def step(self, kind: str, label: str, **fields: Any) -> None: ...
+
 
 _NO_ARGS = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
 
@@ -45,6 +50,12 @@ def _schema(properties: dict[str, Any]) -> dict[str, Any]:
 
 
 _REF = {"type": "string", "description": "Element ref from get_page_state, e.g. e12."}
+# Shown live to the person watching the run, like a narrated test. One short sentence.
+_WHY = {
+    "type": "string",
+    "description": "One short sentence, shown live to the person watching, on what this "
+    "action is checking. E.g. 'Checking that an empty form is rejected'.",
+}
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -59,46 +70,49 @@ TOOLS: list[dict[str, Any]] = [
         "name": "click",
         "description": "Click an element. Returns what changed and any signals produced.",
         "strict": True,
-        "input_schema": _schema({"ref": _REF}),
+        "input_schema": _schema({"ref": _REF, "why": _WHY}),
     },
     {
         "name": "fill",
         "description": "Replace the value of an input or textarea. Use fake test data only.",
         "strict": True,
-        "input_schema": _schema({"ref": _REF, "text": {"type": "string"}}),
+        "input_schema": _schema({"ref": _REF, "text": {"type": "string"}, "why": _WHY}),
     },
     {
         "name": "select_option",
         "description": "Choose an option in a <select> by its visible label or value.",
         "strict": True,
-        "input_schema": _schema({"ref": _REF, "option": {"type": "string"}}),
+        "input_schema": _schema({"ref": _REF, "option": {"type": "string"}, "why": _WHY}),
     },
     {
         "name": "press_key",
         "description": "Press a key on the focused element, e.g. Enter to submit a form.",
         "strict": True,
         "input_schema": _schema(
-            {"key": {"type": "string", "enum": ["Enter", "Tab", "Escape", "Space", "ArrowDown"]}}
+            {
+                "key": {"type": "string", "enum": ["Enter", "Tab", "Escape", "Space", "ArrowDown"]},
+                "why": _WHY,
+            }
         ),
     },
     {
         "name": "navigate",
         "description": "Go to a path or URL on the same site, e.g. /pricing.",
         "strict": True,
-        "input_schema": _schema({"target": {"type": "string"}}),
+        "input_schema": _schema({"target": {"type": "string"}, "why": _WHY}),
     },
     {
         "name": "go_back",
         "description": "Press the browser back button.",
         "strict": True,
-        "input_schema": _NO_ARGS,
+        "input_schema": _schema({"why": _WHY}),
     },
     {
         "name": "take_screenshot",
         "description": "See the current viewport. Use to judge layout, visual feedback and "
         "copy. Costs more than get_page_state, so use it when appearance matters.",
         "strict": True,
-        "input_schema": _NO_ARGS,
+        "input_schema": _schema({"why": _WHY}),
     },
     {
         "name": "report_finding",
@@ -181,7 +195,7 @@ class ExplorationAgent:
         collector: FindingCollector,
         artifacts: ArtifactStore,
         usage: UsageTracker,
-        progress: Progress,
+        recorder: Recorder,
         scan_id: str,
         deadline: float,
     ) -> None:
@@ -192,7 +206,7 @@ class ExplorationAgent:
         self.collector = collector
         self.artifacts = artifacts
         self.usage = usage
-        self.progress = progress
+        self.recorder = recorder
         self.scan_id = scan_id
         self.deadline = deadline
         self.labels: dict[str, str] = {}
@@ -275,38 +289,101 @@ class ExplorationAgent:
     def _label(self, ref: str) -> str:
         return self.labels.get(ref, ref)
 
+    async def _act(
+        self,
+        kind: str,
+        label: str,
+        why: str,
+        run: Callable[[], Awaitable[ActionOutcome]],
+        ref: str | None = None,
+    ) -> str:
+        """Run one browser action and record it with before/after frames for the replay."""
+        box, before = None, None
+        if ref is not None:
+            box = await self.session.target_box(ref)
+            before = await self._frame()
+        outcome = await run()
+        await self.recorder.step(
+            kind,
+            label,
+            why=why.strip() or None,
+            url=outcome.url,
+            shot=await self._frame(),
+            before=before,
+            box=box,
+            status="failed" if outcome.failed else "ok",
+            action_id=outcome.id,
+            signals=outcome.signals,
+        )
+        return outcome.for_model()
+
+    async def _frame(self) -> bytes | None:
+        try:
+            return await self.session.screenshot()
+        except Exception:  # a frame is for the viewer; never let it break the action
+            return None
+
     async def _execute(self, name: str, args: dict[str, Any]) -> tuple[Any, bool, bool]:
         """Returns (tool_result content, is_error, finished)."""
         session = self.session
+        why = args.get("why", "")
         try:
             match name:
                 case "get_page_state":
                     state = await session.snapshot()
                     self._remember_labels(state)
+                    await self.recorder.step("read", "Read the page", url=state.get("url"))
                     return format_page_state(state), False, False
                 case "click":
-                    await self.progress(f"Clicking “{self._label(args['ref'])}”", "action")
-                    return await session.click(args["ref"], self._label(args["ref"])), False, False
+                    ref = args["ref"]
+                    label = self._label(ref)
+                    result = await self._act(
+                        "click", f"“{label}”", why, lambda: session.click(ref, label), ref
+                    )
+                    return result, False, False
                 case "fill":
-                    label = self._label(args["ref"])
-                    await self.progress(f"Typing “{args['text'][:40]}” into {label}", "action")
-                    return await session.fill(args["ref"], label, args["text"]), False, False
+                    ref, text = args["ref"], args["text"]
+                    label = self._label(ref)
+                    result = await self._act(
+                        "type",
+                        f"“{text[:60]}” into {label}",
+                        why,
+                        lambda: session.fill(ref, label, text),
+                        ref,
+                    )
+                    return result, False, False
                 case "select_option":
-                    label = self._label(args["ref"])
-                    await self.progress(f"Choosing “{args['option']}” in {label}", "action")
-                    result = await session.select(args["ref"], label, args["option"])
+                    ref, option = args["ref"], args["option"]
+                    label = self._label(ref)
+                    result = await self._act(
+                        "select",
+                        f"“{option}” in {label}",
+                        why,
+                        lambda: session.select(ref, label, option),
+                        ref,
+                    )
                     return result, False, False
                 case "press_key":
-                    await self.progress(f"Pressing {args['key']}", "action")
-                    return await session.press(args["key"]), False, False
+                    key = args["key"]
+                    result = await self._act("press", key, why, lambda: session.press(key))
+                    return result, False, False
                 case "navigate":
-                    await self.progress(f"Opening {args['target']}", "action")
-                    return await session.navigate(args["target"]), False, False
+                    target = args["target"]
+                    result = await self._act(
+                        "navigate", target, why, lambda: session.navigate(target)
+                    )
+                    return result, False, False
                 case "go_back":
-                    await self.progress("Going back", "action")
-                    return await session.back(), False, False
+                    return await self._act("back", "Back", why, session.back), False, False
                 case "take_screenshot":
                     image = await session.screenshot()
+                    await self.recorder.step(
+                        "look",
+                        "Looked at the page",
+                        why=why or None,
+                        url=session.page.url,
+                        shot=image,
+                    )
                     return (
                         [
                             {
@@ -326,6 +403,7 @@ class ExplorationAgent:
                     return await self._report(args), False, False
                 case "finish":
                     self.summary = args["summary"].strip()
+                    await self.recorder.step("stage", "Claude finished exploring", status="info")
                     return "Session ended.", False, True
                 case _:
                     return f"Unknown tool {name}", True, False
@@ -376,7 +454,14 @@ class ExplorationAgent:
         except Exception as exc:  # evidence image is a bonus, not a requirement
             log.warning("screenshot for %s failed: %s", finding.id, exc)
 
-        await self.progress(f"Found: {finding.title}", "finding")
+        await self.recorder.step(
+            "finding",
+            finding.title,
+            url=self.session.page.url,
+            status="finding",
+            finding_id=finding.id,
+            shot_key=finding.screenshot_key,
+        )
         reply = f"Recorded {finding.id} with evidence {', '.join(valid) or 'none'}."
         if invalid:
             reply += f" Ignored unknown ids: {', '.join(invalid)}."
