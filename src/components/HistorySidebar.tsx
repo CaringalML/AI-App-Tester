@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import type { HistoryEntry } from '../lib/history';
 import type { ScanSummary } from '../lib/types';
-import { durationBetween, formatAgo, formatDuration } from '../lib/time';
+import {
+  durationBetween,
+  formatAgo,
+  formatDuration,
+  formatFullDate,
+  formatWhen,
+} from '../lib/time';
 import { ConfirmDialog } from './ConfirmDialog';
 
 interface Props {
@@ -132,7 +138,8 @@ export function HistorySidebar({
               {targetUrl.host}
             </span>
             <span className="block truncate font-mono text-[11px] text-faint">
-              {targetUrl.path} · {formatAgo(targetSummary?.createdAt ?? target.createdAt)}
+              {targetUrl.path} ·{' '}
+              {formatWhen(targetSummary?.startedAt || targetSummary?.createdAt || target.createdAt)}
             </span>
           </span>
         </div>
@@ -199,7 +206,9 @@ export function HistorySidebar({
                   type="button"
                   onClick={() => onOpen(entry.id)}
                   aria-label={`Open the test of ${host}${path}`}
-                  title={`${host}${path}${
+                  title={`${host}${path}\n${formatWhen(
+                    summary?.startedAt || summary?.createdAt || entry.createdAt,
+                  )}${
                     summary && !running
                       ? ` · ${summary.bugs} broken, ${summary.improvements} to improve`
                       : running
@@ -285,6 +294,7 @@ export function HistorySidebar({
           const running = status === 'running' || status === 'queued';
           const active = entry.id === activeId;
           const took = durationBetween(summary?.startedAt, summary?.finishedAt);
+          const when = summary?.startedAt || summary?.createdAt || entry.createdAt;
 
           return (
             <li key={entry.id} className="group relative">
@@ -332,9 +342,21 @@ export function HistorySidebar({
                       <span className="text-faint">Loading…</span>
                     )}
                   </span>
-                  <span className="mt-0.5 block text-[10.5px] text-faint">
-                    {formatAgo(summary?.createdAt ?? entry.createdAt)}
-                    {took !== null ? ` · took ${formatDuration(took)}` : ''}
+                  <span className="mt-0.5 flex flex-wrap items-center gap-x-1 text-[10.5px] text-faint">
+                    <svg className="size-3 flex-none" {...ICON}>
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 7v5l3 2" />
+                    </svg>
+                    <time
+                      dateTime={when}
+                      title={`${formatFullDate(when)} (${formatAgo(when)})`}
+                      className="whitespace-nowrap"
+                    >
+                      {formatWhen(when)}
+                    </time>
+                    {took !== null ? (
+                      <span className="whitespace-nowrap">· took {formatDuration(took)}</span>
+                    ) : null}
                   </span>
                 </span>
               </button>
