@@ -20,6 +20,8 @@ interface Props {
   /** Pinned step index, or null to follow the latest step. */
   pinned: number | null;
   onPin: (index: number | null) => void;
+  /** Changes when something outside the log asks to bring the pinned step into view. */
+  centerRequest?: number;
   /** Client clock when the user pressed Run; drives the live timer. */
   startedAtMs?: number | null;
   /** Server-measured run length once the scan has finished. */
@@ -68,6 +70,7 @@ export function TestRunner({
   targetUrl,
   pinned,
   onPin,
+  centerRequest,
   startedAtMs,
   durationMs,
   findingsTotal,
@@ -95,6 +98,31 @@ export function TestRunner({
       logRef.current.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
     }
   }, [steps.length, following]);
+
+  // "Show step N" from a finding: scroll the log (not the page) so that row sits
+  // in the middle. Clicks inside the log never move it, so rows stay under the mouse.
+  useEffect(() => {
+    if (!centerRequest || pinned === null) return;
+    // A collapsed phase opens on the next render, so wait a few frames for the row.
+    let frame = 0;
+    let tries = 0;
+    const center = () => {
+      const box = logRef.current;
+      const row = box?.querySelector<HTMLElement>(`[data-step="${pinned}"]`);
+      if (!box || !row) {
+        if (++tries < 10) frame = requestAnimationFrame(center);
+        return;
+      }
+      const offset =
+        row.getBoundingClientRect().top -
+        box.getBoundingClientRect().top -
+        (box.clientHeight - row.offsetHeight) / 2;
+      box.scrollBy({ top: offset, behavior: 'smooth' });
+    };
+    frame = requestAnimationFrame(center);
+    return () => cancelAnimationFrame(frame);
+    // Only a new request should scroll, not every pin change.
+  }, [centerRequest]);
 
   // Tick while live so the "thinking" hint appears during long model turns.
   const elapsed = useElapsed(startedAtMs, live);

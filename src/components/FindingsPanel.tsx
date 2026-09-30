@@ -47,6 +47,8 @@ export function FindingsPanel({
 }: Props) {
   const [filter, setFilter] = useState<Filter>('all');
   const [pinned, setPinned] = useState<number | null>(null);
+  // Bumped by "Show step" so the log centres that row, even when it is already pinned.
+  const [centerRequest, setCenterRequest] = useState(0);
   const runnerRef = useRef<HTMLDivElement>(null);
   const steps = result?.timeline?.length ? result.timeline : timeline;
   const elapsed = useElapsed(runStartedAt, phase === 'running');
@@ -71,6 +73,7 @@ export function FindingsPanel({
 
   function showInReplay(step: TimelineStep) {
     setPinned(step.index);
+    setCenterRequest((n) => n + 1);
     runnerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
@@ -125,6 +128,7 @@ export function FindingsPanel({
         targetUrl={targetUrl}
         pinned={pinned}
         onPin={setPinned}
+        centerRequest={centerRequest}
         startedAtMs={runStartedAt}
       />
     );
@@ -170,6 +174,7 @@ export function FindingsPanel({
             targetUrl={result?.targetUrl ?? targetUrl}
             pinned={pinned}
             onPin={setPinned}
+            centerRequest={centerRequest}
             durationMs={duration}
             findingsTotal={result?.findings.length}
           />

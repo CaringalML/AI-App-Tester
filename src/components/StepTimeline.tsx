@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { StepKind, TimelineStep } from '../lib/types';
 
 /*
@@ -139,6 +139,18 @@ interface Props {
 export function StepTimeline({ steps, live, pinned, following, now, onPin, onHover }: Props) {
   const [collapsed, setCollapsed] = useState<Set<PhaseId>>(new Set());
 
+  // A step pinned from elsewhere (a finding's "Show step") must be visible, so open its phase.
+  const pinnedPhase = steps.find((s) => s.index === pinned)?.phase ?? null;
+  useEffect(() => {
+    if (!pinnedPhase) return;
+    setCollapsed((prev) => {
+      if (!prev.has(pinnedPhase)) return prev;
+      const next = new Set(prev);
+      next.delete(pinnedPhase);
+      return next;
+    });
+  }, [pinned, pinnedPhase]);
+
   const at = (s: TimelineStep) => Date.parse(s.at);
   const last = steps[steps.length - 1];
   const currentPhase: PhaseId | null = live && last ? (last.phase ?? 'prepare') : null;
@@ -243,7 +255,7 @@ export function StepTimeline({ steps, live, pinned, following, now, onPin, onHov
                   const current = live && following && s === last;
                   const stage = s.kind === 'stage';
                   return (
-                    <li key={s.index} className="relative">
+                    <li key={s.index} data-step={s.index} className="relative">
                       <button
                         type="button"
                         onMouseEnter={() => onHover(s.index)}
