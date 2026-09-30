@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Finding, Severity } from '../lib/types';
+import { LinkedText } from './LinkedText';
 import { RegressionTest } from './RegressionTest';
 
 const CONFIDENCE_NOTE: Record<Finding['confidence'], string> = {
@@ -158,7 +159,9 @@ export function FindingCard({
             </h4>
             <ol className="grid list-decimal gap-1 pl-4.5 text-sm text-muted">
               {finding.steps.map((step, index) => (
-                <li key={index}>{step}</li>
+                <li key={index}>
+                  <LinkedText text={step} />
+                </li>
               ))}
             </ol>
           </section>
@@ -167,7 +170,9 @@ export function FindingCard({
             <h4 className="mb-1.25 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
               Suggested fix
             </h4>
-            <p className="text-sm text-muted">{finding.suggestion}</p>
+            <p className="text-sm text-muted">
+              <LinkedText text={finding.suggestion} />
+            </p>
           </section>
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-bg px-3 py-2.25 text-[12.5px] text-faint">
