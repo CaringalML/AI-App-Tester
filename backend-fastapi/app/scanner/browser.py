@@ -139,11 +139,40 @@ async () => {
     resultTypes: ['violations'],
     runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },
   });
-  return result.violations.map(v => ({
-    id: v.id, impact: v.impact, help: v.help, helpUrl: v.helpUrl,
-    count: v.nodes.length,
-    nodes: v.nodes.slice(0, 4).map(n => ({ target: n.target.join(' '), html: n.html.slice(0, 180) })),
-  }));
+  // What a person would call the element: its visible text or name, not its selector.
+  const textOf = (n) => {
+    try {
+      const el = document.querySelector(n.target[0]);
+      const text = el ? (el.innerText || el.getAttribute('alt') || el.getAttribute('aria-label') || '') : '';
+      return text.replace(/\\s+/g, ' ').trim().slice(0, 60);
+    } catch (e) {
+      return '';
+    }
+  };
+  // The colours and ratio axe measured, for contrast failures.
+  const contrastOf = (n) => {
+    const d = (n.any[0] || {}).data || {};
+    return d.fgColor ? { fg: d.fgColor, bg: d.bgColor, ratio: d.contrastRatio, need: d.expectedContrastRatio } : null;
+  };
+  return result.violations.map(v => {
+    const pairs = {};
+    for (const n of v.nodes) {
+      const c = contrastOf(n);
+      if (!c) continue;
+      const key = [c.fg, c.bg, c.need].join(' ');
+      pairs[key] = pairs[key] || { ...c, count: 0 };
+      pairs[key].count += 1;
+    }
+    return {
+      id: v.id, impact: v.impact, help: v.help, helpUrl: v.helpUrl,
+      count: v.nodes.length,
+      nodes: v.nodes.slice(0, 4).map(n => ({
+        target: n.target.join(' '), html: n.html.slice(0, 180), text: textOf(n), contrast: contrastOf(n),
+      })),
+      // The most common colour pairs across every failing element, with how many use each.
+      pairs: Object.values(pairs).sort((a, b) => b.count - a.count).slice(0, 5),
+    };
+  });
 }
 """
 

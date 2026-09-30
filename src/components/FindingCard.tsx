@@ -35,6 +35,91 @@ const SEVERITY_BADGE: Record<Severity, string> = {
   low: 'text-low border-low/40',
 };
 
+/** "#a48d78 text on #e6dac8" or "#ffffff on #887564": a measured text/background pair. */
+const COLOUR_PAIR = /(#[0-9a-f]{6}) (?:text )?on (#[0-9a-f]{6})/i;
+
+/** A sample of text in exact colours, so contrast can be seen, not just read about. */
+function Swatch({ fg, bg }: { fg: string; bg: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex-none rounded px-1.5 font-sans text-[12px] font-semibold"
+      style={{ color: fg, background: bg }}
+    >
+      Aa
+    </span>
+  );
+}
+
+/** One line of the browser log; a colour contrast line leads with a sample. */
+function LogLine({ line }: { line: string }) {
+  const pair = COLOUR_PAIR.exec(line);
+  return (
+    <li className="flex items-baseline gap-2">
+      {pair ? <Swatch fg={pair[1]} bg={pair[2]} /> : null}
+      <span className="min-w-0">{line}</span>
+    </li>
+  );
+}
+
+/** "text #a48d78 → #705d4b on #e6dac8" and "background #887564 → #857262 behind #ffffff text". */
+const FIX_TEXT = /text (#[0-9a-f]{6}) → (#[0-9a-f]{6}) on (#[0-9a-f]{6})/i;
+const FIX_BACKGROUND = /background (#[0-9a-f]{6}) → (#[0-9a-f]{6}) behind (#[0-9a-f]{6}) text/i;
+
+/** A suggested colour change, shown as it looks now and after the change. */
+function FixLine({ line }: { line: string }) {
+  const text = FIX_TEXT.exec(line);
+  const background = FIX_BACKGROUND.exec(line);
+  const before = text
+    ? { fg: text[1], bg: text[3] }
+    : background && { fg: background[3], bg: background[1] };
+  const after = text
+    ? { fg: text[2], bg: text[3] }
+    : background && { fg: background[3], bg: background[2] };
+  return (
+    <li className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+      {before && after ? (
+        <span className="flex flex-none items-center gap-1" title="Now, and after the change">
+          <Swatch {...before} />
+          <span aria-hidden="true" className="text-faint">
+            →
+          </span>
+          <Swatch {...after} />
+        </span>
+      ) : null}
+      <span className="min-w-0 font-mono text-[12.5px]">{line}</span>
+    </li>
+  );
+}
+
+/** The fix as prose, with any "- " lines shown as a list of changes. */
+function SuggestedFix({ text }: { text: string }) {
+  const lines = text.split('\n');
+  const items = lines.filter((line) => line.startsWith('- ')).map((line) => line.slice(2));
+  const [intro, ...rest] = lines.filter((line) => !line.startsWith('- '));
+  return (
+    <div className="grid gap-2 text-sm text-muted">
+      {intro ? (
+        <p>
+          <LinkedText text={intro} />
+        </p>
+      ) : null}
+      {items.length ? (
+        <ul className="grid gap-1.5">
+          {items.map((item, index) => (
+            <FixLine key={index} line={item} />
+          ))}
+        </ul>
+      ) : null}
+      {rest.map((line, index) => (
+        <p key={index}>
+          <LinkedText text={line} />
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /** A section heading with a copy button for just that section. */
 function SectionHeading({
   children,
@@ -71,6 +156,8 @@ export function FindingCard({
   onShowInReplay?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Findings that explain themselves in prose carry their browser log after a marker.
+  const log = recordedEvidence(finding.evidence);
   return (
     <article className="relative min-w-0 overflow-hidden rounded-[11px] border border-line bg-raised transition-colors hover:border-line-strong">
       {/* Outside the header button, since a button cannot hold another button. */}
@@ -187,19 +274,19 @@ export function FindingCard({
             <SectionHeading copy={() => bugText(finding, targetUrl)} label="what happened">
               What happened
             </SectionHeading>
-            {finding.source === 'agent' ? (
+            {finding.source === 'agent' || log.length ? (
               <>
                 <p className="text-sm leading-relaxed whitespace-pre-wrap text-muted">
                   {readableEvidence(finding.evidence)}
                 </p>
-                {recordedEvidence(finding.evidence).length ? (
+                {log.length ? (
                   <div className="mt-2.5 rounded-lg border border-line bg-bg px-3 py-2">
                     <p className="mb-1 text-[11px] font-semibold tracking-[0.06em] text-faint uppercase">
                       What the browser recorded
                     </p>
                     <ul className="grid gap-1 font-mono text-[12px] leading-relaxed text-muted">
-                      {recordedEvidence(finding.evidence).map((line, index) => (
-                        <li key={index}>{line}</li>
+                      {log.map((line, index) => (
+                        <LogLine key={index} line={line} />
                       ))}
                     </ul>
                   </div>
@@ -246,9 +333,7 @@ export function FindingCard({
             <SectionHeading copy={() => finding.suggestion} label="the suggested fix">
               Suggested fix
             </SectionHeading>
-            <p className="text-sm text-muted">
-              <LinkedText text={finding.suggestion} />
-            </p>
+            <SuggestedFix text={finding.suggestion} />
           </section>
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-bg px-3 py-2.25 text-[12.5px] text-faint">

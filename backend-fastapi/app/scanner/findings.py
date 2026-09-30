@@ -5,6 +5,8 @@ browser verifiably recorded, so they carry high confidence by construction and
 are the half of the report that cannot be a hallucination.
 """
 
+import colorsys
+import re
 from collections import defaultdict
 from urllib.parse import urlsplit
 
@@ -212,16 +214,129 @@ def _broken_links(log: ObservationLog, collector: FindingCollector) -> None:
 
 _IMPACT = {"critical": "high", "serious": "medium", "moderate": "low", "minor": "low"}
 
+# The accessibility rules sites fail most, in plain words: what is wrong, who it
+# hurts, and what to change. A finding should make sense to someone who has never
+# heard of WCAG. Any other rule falls back to axe-core's own description.
+_A11Y_RULES: dict[str, tuple[str, str, str]] = {
+    "color-contrast": (
+        "Text is too faint against its background (low colour contrast)",
+        "People with low vision, many older people and anyone reading a phone in sunlight "
+        "struggle to read it.",
+        "",  # built from the measured colours instead
+    ),
+    "image-alt": (
+        "Images have no text alternative (alt text)",
+        "Screen readers have nothing to say for them, and nothing shows if an image fails to load.",
+        'Add alt text saying what each image shows, or alt="" when it is purely decorative.',
+    ),
+    "button-name": (
+        "Buttons have no name a screen reader can announce",
+        'Screen reader users hear only "button" and cannot tell what it does.',
+        "Give each button visible text, an aria-label, or an image with alt text inside it.",
+    ),
+    "link-name": (
+        "Links have no name a screen reader can announce",
+        'Screen reader users hear only "link" and cannot tell where it goes.',
+        "Give each link text, an aria-label, or alt text on the image inside it.",
+    ),
+    "label": (
+        "Form fields have no label",
+        "Screen reader users are not told what to enter, and clicking the text beside a field "
+        "does not select it.",
+        'Add a <label for="..."> for each field, or an aria-label.',
+    ),
+    "select-name": (
+        "Dropdowns have no label",
+        "Screen reader users are not told what the dropdown is for.",
+        'Add a <label for="..."> for each dropdown, or an aria-label.',
+    ),
+    "input-image-alt": (
+        "Image buttons have no text alternative",
+        "Screen reader users cannot tell what the button does.",
+        'Add alt text to each <input type="image"> saying what it does.',
+    ),
+    "frame-title": (
+        "Embedded frames have no title",
+        "Screen reader users cannot tell what an embedded map, video or form contains.",
+        "Add a title attribute describing each <iframe>.",
+    ),
+    "meta-viewport": (
+        "Zooming is blocked on phones",
+        "People who need larger text cannot pinch to zoom.",
+        "Remove user-scalable=no, and any maximum-scale below 5, from the viewport meta tag.",
+    ),
+    "link-in-text-block": (
+        "Links in text stand out by colour alone",
+        "People who cannot tell the colours apart cannot find the links.",
+        "Underline links in body text, or make them contrast 3:1 with the text around them.",
+    ),
+    "aria-hidden-focus": (
+        "Hidden content can still receive keyboard focus",
+        "Keyboard users land on controls they cannot see, and screen readers stay silent.",
+        "Make controls inside aria-hidden areas unfocusable, or remove aria-hidden.",
+    ),
+    "nested-interactive": (
+        "Controls are nested inside other controls",
+        "Screen readers and keyboards may skip the control inside.",
+        "Do not put buttons or links inside other buttons or links.",
+    ),
+    "scrollable-region-focusable": (
+        "Scrollable areas cannot be scrolled with the keyboard",
+        "Keyboard users cannot reach the content inside them.",
+        'Make the scrollable area focusable (tabindex="0") or put a focusable element inside it.',
+    ),
+    "bypass": (
+        "There is no way to skip to the main content",
+        "Keyboard users must tab through every menu link on every page.",
+        'Add a "Skip to main content" link, or wrap the content in a <main> element.',
+    ),
+    "list": (
+        "Lists are built incorrectly",
+        "Screen readers announce the wrong number of items, or none.",
+        "Put only <li> elements directly inside <ul> and <ol>.",
+    ),
+    "listitem": (
+        "List items sit outside a list",
+        "Screen readers do not announce them as a list.",
+        "Wrap <li> elements in a <ul> or <ol>.",
+    ),
+}
+_A11Y_FALLBACK_WHY = (
+    "It makes the page harder to use for people who rely on assistive technology such as "
+    "screen readers or keyboards."
+)
+
 
 def _accessibility(log: ObservationLog, collector: FindingCollector) -> None:
     for rule, group in _group(log.of_kind("a11y"), lambda o: o.data.get("id", o.text)).items():
         first = group[0]
         impact = first.data.get("impact") or "moderate"
         nodes = first.data.get("nodes") or []
-        examples = "\n".join(f"- {n['target']}: {n['html']}" for n in nodes[:3])
         total = sum(int(o.data.get("count") or 0) for o in group)
+        help_url = first.data.get("helpUrl")
+        title, why, fix = _A11Y_RULES.get(
+            rule,
+            (
+                first.data.get("help") or f"Accessibility rule {rule} failed",
+                _A11Y_FALLBACK_WHY,
+                f"See {help_url} for how to fix it.",
+            ),
+        )
+        if rule == "color-contrast":
+            pairs = [p for o in group for p in (o.data.get("pairs") or [])]
+            evidence = _contrast_evidence(total, why, pairs, nodes)
+            suggestion = _contrast_fix(pairs, nodes, help_url)
+        else:
+            evidence = (
+                f"The automated accessibility check (axe-core) found {total} element(s) with "
+                f"this problem. {why}\n\nRecorded evidence:\n"
+                + "\n".join(f"- {_named(n)}{n['target']}: {n['html']}" for n in nodes[:3])
+            )
+            suggestion = fix
+            if rule in _A11Y_RULES and help_url:  # the fallback's text already links it
+                suggestion += f" Details: {help_url}"
         collector.add(
-            title=first.data.get("help") or f"Accessibility rule {rule} failed",
+            title=title,
             category="bug" if impact == "critical" else "improvement",
             severity=_IMPACT.get(impact, "low"),
             confidence="high",
@@ -229,13 +344,118 @@ def _accessibility(log: ObservationLog, collector: FindingCollector) -> None:
             source="automated",
             location=_where(group),
             selector=nodes[0]["target"] if nodes else None,
-            evidence=f"axe-core rule '{rule}' ({impact} impact) failed on {total} element(s).\n"
-            + examples,
+            evidence=evidence,
             steps=[f"Open {first.page}", "Run an accessibility checker such as axe DevTools"],
-            suggestion=f"See {first.data.get('helpUrl')} for the fix. This affects people using "
-            "screen readers, keyboards or high contrast.",
+            suggestion=suggestion,
             evidence_ids=_ids(group),
         )
+
+
+def _named(node: dict) -> str:
+    """'"Book now" at ' when the element has visible text, else nothing."""
+    return f'"{node["text"]}" at ' if node.get("text") else ""
+
+
+def _contrast_evidence(total: int, why: str, pairs: list[dict], nodes: list[dict]) -> str:
+    lines = [
+        f"{p['fg']} text on {p['bg']}: {p['ratio']}:1, needs {p['need']} "
+        f"({p['count']} element{'s' if p['count'] != 1 else ''})"
+        for p in pairs[:5]
+    ]
+    for node in nodes[:3]:
+        c = node.get("contrast")
+        if c:
+            # The text finds the element faster than a selector does; fall back to the selector.
+            where = f'"{node["text"]}"' if node.get("text") else node["target"]
+            lines.append(f"{where}: {c['fg']} on {c['bg']} = {c['ratio']}:1")
+    return (
+        f"{total} piece(s) of text are too faint against their background. Text needs a "
+        "contrast ratio of at least 4.5:1, or 3:1 when it is large (about 24px, or 19px bold); "
+        "1:1 would be invisible and black on white is 21:1. Text that is part of a logo is "
+        f"exempt. {why}\n\nRecorded evidence:\n" + "\n".join(f"- {line}" for line in lines)
+    )
+
+
+def _contrast_fix(pairs: list[dict], nodes: list[dict], help_url: str | None) -> str:
+    """One passing colour per failing pair: the most common pairs, then the named examples.
+
+    The examples matter even when they are rare: the first failures on a page are often
+    its header and its main button, which are the ones most worth fixing.
+    """
+    candidates = [
+        (p["fg"], p["bg"], p["need"], f"{p['count']} element{'s' if p['count'] != 1 else ''}")
+        for p in pairs[:3]
+    ]
+    for node in nodes[:3]:
+        c = node.get("contrast")
+        if c and node.get("text"):
+            candidates.append((c["fg"], c["bg"], c["need"], f'"{node["text"]}"'))
+    lines: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for fg, bg, need, label in candidates:
+        if (fg, bg) in seen or len(lines) == 5:
+            continue
+        seen.add((fg, bg))
+        if fix := passing_colour(fg, bg, need):
+            lines.append(f"- {fix} ({label})")
+    text = (
+        "Darken the text or its background until each pair reaches the ratio it needs. "
+        "The same colours, slightly darker, keep the design"
+    )
+    text += (":\n" + "\n".join(lines)) if lines else "."
+    return text + (f"\nDetails: {help_url}" if help_url else "")
+
+
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _luminance(hex_colour: str) -> float:
+    def channel(value: int) -> float:
+        c = value / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (int(hex_colour[i : i + 2], 16) for i in (1, 3, 5))
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def contrast_ratio(a: str, b: str) -> float:
+    """The WCAG contrast ratio of two #rrggbb colours, from 1 to 21."""
+    light, dark = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+def _darken_until(colour: str, against: str, target: float) -> str | None:
+    """The same hue and saturation, darker, until it reaches `target` against `against`."""
+    r, g, b = (int(colour[i : i + 2], 16) / 255 for i in (1, 3, 5))
+    hue, lightness, saturation = colorsys.rgb_to_hls(r, g, b)
+    while lightness > 0:
+        rgb = colorsys.hls_to_rgb(hue, lightness, saturation)
+        candidate = "#" + "".join(f"{round(c * 255):02x}" for c in rgb)
+        if contrast_ratio(candidate, against) >= target:
+            return candidate
+        lightness -= 0.005
+    return None
+
+
+def passing_colour(fg: str, bg: str, need: str | float) -> str | None:
+    """The smallest darkening that makes a text/background pair pass, as advice.
+
+    Dark text on a light background: darken the text. Light text on a dark
+    background (white on a brand-coloured button): darken the background, so the
+    text stays as designed.
+    """
+    try:
+        target = float(str(need).split(":")[0])
+    except ValueError:
+        return None
+    if not (_HEX.match(fg or "") and _HEX.match(bg or "")):
+        return None
+    fg, bg = fg.lower(), bg.lower()
+    if _luminance(fg) <= _luminance(bg):
+        fixed = _darken_until(fg, bg, target)
+        return f"text {fg} → {fixed} on {bg}" if fixed else None
+    fixed = _darken_until(bg, fg, target)
+    return f"background {bg} → {fixed} behind {fg} text" if fixed else None
 
 
 def _performance(log: ObservationLog, collector: FindingCollector) -> None:

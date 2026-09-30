@@ -1,5 +1,10 @@
 from app.models import ScanOptions
-from app.scanner.findings import FindingCollector, build_automated_findings
+from app.scanner.findings import (
+    FindingCollector,
+    build_automated_findings,
+    contrast_ratio,
+    passing_colour,
+)
 from app.scanner.observations import ObservationLog
 
 PAGE = "https://shop.example/checkout"
@@ -75,10 +80,109 @@ def test_network_severity_depends_on_what_failed() -> None:
 
 
 def test_critical_accessibility_violation_is_a_bug() -> None:
-    a11y = next(f for f in _build() if f.title == "Buttons must have discernible text")
+    a11y = next(f for f in _build() if f.kind == "accessibility" and f.selector == "#pay")
     assert a11y.category == "bug"
     assert a11y.severity == "high"
-    assert a11y.selector == "#pay"
+    # Said in plain words, with who it affects, rather than quoting the rule.
+    assert a11y.title == "Buttons have no name a screen reader can announce"
+    assert 'hear only "button"' in a11y.evidence
+    assert a11y.suggestion.endswith("https://dequeuniversity.com/rules/axe/4.10/button-name")
+
+
+# Measured by axe-core on a real spa website, 30 Sep 2026.
+_CONTRAST = {
+    "id": "color-contrast",
+    "impact": "serious",
+    "help": "Elements must meet minimum color contrast ratio thresholds",
+    "helpUrl": "https://dequeuniversity.com/rules/axe/4.10/color-contrast",
+    "count": 172,
+    "nodes": [
+        {
+            "target": ".btn",
+            "html": '<a class="btn">Book now</a>',
+            "text": "Book now",
+            "contrast": {"fg": "#ffffff", "bg": "#887564", "ratio": 4.39, "need": "4.5:1"},
+        }
+    ],
+    "pairs": [
+        {"fg": "#a48d78", "bg": "#e6dac8", "ratio": 2.28, "need": "4.5:1", "count": 36},
+        {"fg": "#ffffff", "bg": "#887564", "ratio": 4.39, "need": "4.5:1", "count": 3},
+    ],
+}
+
+
+def _contrast_finding():
+    log = ObservationLog()
+    log.add("a11y", PAGE, "contrast", **_CONTRAST)
+    collector = FindingCollector()
+    build_automated_findings(log, collector, ScanOptions())
+    return collector.items[0]
+
+
+def test_contrast_finding_shows_the_measured_colours_in_plain_words() -> None:
+    finding = _contrast_finding()
+    assert finding.title == "Text is too faint against its background (low colour contrast)"
+    assert finding.category == "improvement" and finding.severity == "medium"
+    assert "172 piece(s) of text are too faint" in finding.evidence
+    assert "at least 4.5:1" in finding.evidence
+    assert "- #a48d78 text on #e6dac8: 2.28:1, needs 4.5:1 (36 elements)" in finding.evidence
+    assert '- "Book now": #ffffff on #887564 = 4.39:1' in finding.evidence
+    assert "logo is exempt" in finding.evidence
+
+
+def test_contrast_fix_suggests_the_nearest_colours_that_pass() -> None:
+    suggestion = _contrast_finding().suggestion
+    # Dark text on a light background: darken the text.
+    assert "\n- text #a48d78 → #705d4b on #e6dac8 (36 elements)" in suggestion
+    # White text on a coloured button: darken the button, keep the text. Listed once,
+    # though the pair also appears as the named "Book now" example.
+    assert "\n- background #887564 → #857262 behind #ffffff text (3 elements)" in suggestion
+    assert suggestion.count("#857262") == 1
+    assert suggestion.endswith(
+        "\nDetails: https://dequeuniversity.com/rules/axe/4.10/color-contrast"
+    )
+
+
+def test_a_rare_pair_on_a_named_element_still_gets_a_fix() -> None:
+    # The page's main button is often a pair of its own, used once; it must not drop out.
+    data = {**_CONTRAST, "pairs": _CONTRAST["pairs"][:1]}
+    log = ObservationLog()
+    log.add("a11y", PAGE, "contrast", **data)
+    collector = FindingCollector()
+    build_automated_findings(log, collector, ScanOptions())
+    assert '- background #887564 → #857262 behind #ffffff text ("Book now")' in (
+        collector.items[0].suggestion
+    )
+    assert contrast_ratio("#705d4b", "#e6dac8") >= 4.5
+    assert contrast_ratio("#ffffff", "#857262") >= 4.5
+
+
+def test_contrast_ratio_matches_the_wcag_formula() -> None:
+    assert round(contrast_ratio("#000000", "#ffffff"), 1) == 21.0
+    assert round(contrast_ratio("#777777", "#777777"), 1) == 1.0
+    assert passing_colour("#a48d78", "not-a-colour", "4.5:1") is None
+
+
+def test_an_unfamiliar_rule_falls_back_to_axe_cores_words() -> None:
+    log = ObservationLog()
+    log.add(
+        "a11y",
+        PAGE,
+        "x",
+        id="some-new-rule",
+        impact="moderate",
+        help="Some new rule text",
+        helpUrl="https://dequeuniversity.com/rules/axe/4.10/some-new-rule",
+        count=1,
+        nodes=[{"target": "#x", "html": "<div id=x></div>"}],
+    )
+    collector = FindingCollector()
+    build_automated_findings(log, collector, ScanOptions())
+    finding = next(f for f in collector.items if f.kind == "accessibility")
+    assert finding.title == "Some new rule text"
+    assert finding.suggestion == (
+        "See https://dequeuniversity.com/rules/axe/4.10/some-new-rule for how to fix it."
+    )
 
 
 def test_slow_load_is_an_improvement_with_measured_evidence() -> None:
