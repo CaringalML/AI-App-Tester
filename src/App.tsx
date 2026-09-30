@@ -17,6 +17,17 @@ import {
 import { loadHistory, saveHistory, type HistoryEntry } from './lib/history';
 
 const HISTORY_REFRESH_MS = 8000;
+
+/** "https://www.example.com/login" -> "example.com/login", for a compact heading. */
+function displayUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname === '/' ? '' : parsed.pathname;
+    return parsed.host.replace(/^www\./, '') + path;
+  } catch {
+    return url;
+  }
+}
 const RAIL_KEY = 'ai-app-tester:sidebar';
 
 export default function App() {
@@ -79,18 +90,17 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const resultsRef = useRef<HTMLElement>(null);
   // Only one scan is shown at a time; switching aborts polling of the previous one.
   const following = useRef<AbortController | null>(null);
 
   useEffect(() => saveHistory(history), [history]);
 
-  // Bring the runner into view the moment it first appears. Scrolling when the scan
-  // merely starts does nothing: the page is still short and the runner not rendered.
-  const runnerVisible = phase === 'running' && timeline.length > 0;
+  // While a test runs or its results are open, the landing content (tagline and URL
+  // form) steps aside so the run has the screen. New test brings it back.
+  const focused = phase === 'running' || phase === 'done';
   useEffect(() => {
-    if (runnerVisible) resultsRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [runnerVisible]);
+    if (focused) window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [focused]);
 
   // Refreshes can outlive the render that started them (a scan finishing minutes
   // later), so they read the current list through a ref rather than a stale closure.
@@ -221,7 +231,6 @@ export default function App() {
     setActiveId(id);
     setTarget(history.find((e) => e.id === id)?.targetUrl ?? '');
     void follow(id, true);
-    resultsRef.current?.scrollIntoView({ behavior: 'smooth' });
   }
 
   function newTest() {
@@ -230,9 +239,12 @@ export default function App() {
     setPhase('idle');
     setDrawerOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    document
-      .querySelector<HTMLInputElement>('input[aria-label="Address of the app to test"]')
-      ?.focus();
+    // The form is inert while collapsed; focus it after the render that restores it.
+    setTimeout(() => {
+      document
+        .querySelector<HTMLInputElement>('input[aria-label="Address of the app to test"]')
+        ?.focus({ preventScroll: true });
+    }, 60);
   }
 
   async function removeFromHistory(id: string) {
@@ -334,50 +346,96 @@ export default function App() {
           <ThemeToggle />
         </header>
 
-        <main className="relative mx-auto w-full max-w-205 flex-1 px-4 pt-6 pb-14 sm:px-6 sm:pt-9 sm:pb-16">
-          <section className="mb-8 text-center">
-            {/* The lineage, for anyone who knows the names; the headline is for everyone else. */}
-            <span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-surface px-3 py-1 text-[11.5px] font-medium tracking-[0.06em] text-muted uppercase">
-              Cypress
-              <span className="text-accent" aria-hidden="true">
-                ×
-              </span>
-              <span className="sr-only">plus</span>
-              Playwright
-              <span className="text-accent" aria-hidden="true">
-                ×
-              </span>
-              <span className="sr-only">plus</span>
-              Claude
-            </span>
+        {/* Collapses by animating grid rows from 1fr to 0fr: a smooth height change
+            without measuring anything. Inert while hidden, so Tab cannot land in it. */}
+        <div
+          className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+            focused ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100'
+          }`}
+          {...(focused ? { inert: '', 'aria-hidden': true } : {})}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <main className="relative mx-auto w-full max-w-205 px-4 pt-6 pb-14 sm:px-6 sm:pt-9 sm:pb-16">
+              <section className="mb-8 text-center">
+                {/* The lineage, for anyone who knows the names; the headline is for everyone else. */}
+                <span className="mb-4 inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-surface px-3 py-1 text-[11.5px] font-medium tracking-[0.06em] text-muted uppercase">
+                  Cypress
+                  <span className="text-accent" aria-hidden="true">
+                    ×
+                  </span>
+                  <span className="sr-only">plus</span>
+                  Playwright
+                  <span className="text-accent" aria-hidden="true">
+                    ×
+                  </span>
+                  <span className="sr-only">plus</span>
+                  Claude
+                </span>
 
-            <h1 className="text-[clamp(2rem,5.2vw,3.1rem)] leading-[1.08] font-semibold tracking-[-0.035em] text-balance">
-              Tests your app like a person.
-              <br />
-              <span className="text-accent">Reports like an engineer.</span>
-            </h1>
+                <h1 className="text-[clamp(2rem,5.2vw,3.1rem)] leading-[1.08] font-semibold tracking-[-0.035em] text-balance">
+                  Tests your app like a person.
+                  <br />
+                  <span className="text-accent">Reports like an engineer.</span>
+                </h1>
 
-            <p className="mx-auto mt-4 max-w-[56ch] text-[15.5px] text-pretty text-muted">
-              Cypress&rsquo;s time-travel replay and Playwright&rsquo;s real browser, with Claude
-              deciding what to try. Watch it explore, see exactly what it saw, and keep the bugs it
-              reproduces as Playwright tests.
-            </p>
-          </section>
+                <p className="mx-auto mt-4 max-w-[56ch] text-[15.5px] text-pretty text-muted">
+                  Cypress&rsquo;s time-travel replay and Playwright&rsquo;s real browser, with
+                  Claude deciding what to try. Watch it explore, see exactly what it saw, and keep
+                  the bugs it reproduces as Playwright tests.
+                </p>
+              </section>
 
-          <ScanForm
-            options={options}
-            onOptionsChange={setOptions}
-            onSubmit={handleScan}
-            busy={phase === 'running'}
-            busySince={runStartedAt}
-          />
-        </main>
+              <ScanForm
+                options={options}
+                onOptionsChange={setOptions}
+                onSubmit={handleScan}
+                busy={phase === 'running'}
+                busySince={runStartedAt}
+              />
+            </main>
+          </div>
+        </div>
 
         {/* Wider than the form: the runner needs room for a log beside a real viewport. */}
         <section
-          ref={resultsRef}
-          className="@container relative mx-auto -mt-8 w-full max-w-300 scroll-mt-4 px-4 pb-16 sm:px-6"
+          className={`@container relative mx-auto w-full max-w-300 flex-1 scroll-mt-4 px-4 pb-16 transition-[margin] duration-300 sm:px-6 ${
+            focused ? 'mt-1' : '-mt-8'
+          }`}
         >
+          {focused ? (
+            <div className="mb-4 flex animate-rise items-center justify-between gap-3">
+              <p className="flex min-w-0 items-baseline gap-2">
+                <span className="flex-none font-mono text-[11px] tracking-[0.08em] text-faint uppercase">
+                  {phase === 'running' ? 'Testing' : 'Results for'}
+                </span>
+                <span className="truncate text-[14px] text-ink" title={target}>
+                  {displayUrl(target)}
+                </span>
+              </p>
+              {/* Desktop has New test in the sidebar; smaller screens and the
+                  placeholder build (no sidebar) need a way back here. */}
+              <button
+                type="button"
+                onClick={newTest}
+                className={`flex flex-none items-center gap-1 rounded-lg border border-line-strong px-2.5 py-1.5 text-[12.5px] text-muted transition hover:border-accent/40 hover:text-ink ${
+                  isLiveApi ? 'lg:hidden' : ''
+                }`}
+              >
+                <svg
+                  className="size-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                New test
+              </button>
+            </div>
+          ) : null}
           <FindingsPanel
             key={activeId ?? 'none'}
             phase={phase}
