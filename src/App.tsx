@@ -409,10 +409,7 @@ export default function App() {
                 ) : null}
               </button>
             ) : null}
-            <span
-              className="size-5.5 rounded-[7px] bg-linear-[140deg] from-accent to-[#ff9c6b] ring-1 ring-accent/30"
-              aria-hidden="true"
-            />
+            <img src="/images/logo-64.png" alt="" width={28} height={28} className="size-7" />
             <span className="font-semibold tracking-tight">AI App Tester</span>
           </div>
           <ThemeToggle />
