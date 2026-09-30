@@ -114,6 +114,13 @@ jobs:
 
       - name: Smoke test the public endpoint
         run: |
+          # Scaled to zero between demos is a deliberate state, not a failed deploy:
+          # the new revision is registered and will be used on the next scale-up.
+          desired=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"             --query 'services[0].desiredCount' --output text)
+          if [ "$desired" = "0" ]; then
+            echo "::notice::Service is scaled to zero, so there is nothing to smoke test. The new revision starts on the next scale-up."
+            exit 0
+          fi
           for attempt in 1 2 3 4 5 6; do
             if curl -fsS https://api.nodepulsecaringal.xyz/healthz; then exit 0; fi
             sleep 10

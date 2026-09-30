@@ -6,7 +6,14 @@
  * scan, get an id back immediately, then poll its record and stream the
  * progress log into the UI until it finishes.
  */
-import type { ScanOptions, ScanResult, ScanStatus, ScanSummary, TimelineStep } from './types';
+import type {
+  ScanOptions,
+  ScanResult,
+  ScanStage,
+  ScanStatus,
+  ScanSummary,
+  TimelineStep,
+} from './types';
 
 const API_URL = import.meta.env.VITE_API_URL?.replace(/\/+$/, '');
 
@@ -18,6 +25,8 @@ const GIVE_UP_MS = 8 * 60 * 1000;
 
 interface ApiScan extends Omit<ScanResult, 'pagesVisited'> {
   status: ScanStatus;
+  stage?: ScanStage;
+  completion?: number;
   error?: string | null;
   visitedUrls: string[];
   progress: { at: string; message: string; kind: string }[];
@@ -33,6 +42,9 @@ export interface LiveUpdate {
   targetUrl: string;
   progress: string[];
   timeline: TimelineStep[];
+  stage: ScanStage;
+  /** 0 to 1, from the server; only ever increases. */
+  completion: number;
 }
 
 async function readError(response: Response): Promise<string> {
@@ -113,6 +125,8 @@ export async function followScan(
       targetUrl: scan.targetUrl,
       progress: scan.progress.map((event) => event.message),
       timeline: scan.timeline ?? [],
+      stage: scan.stage ?? 'queued',
+      completion: scan.completion ?? 0,
     });
 
     if (scan.status === 'error' && scan.findings.length === 0) {

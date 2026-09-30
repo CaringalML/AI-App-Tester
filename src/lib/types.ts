@@ -115,6 +115,10 @@ export type ScanPhase = 'idle' | 'running' | 'done' | 'error';
 
 export type ScanStatus = 'queued' | 'running' | 'done' | 'error';
 
+/** Where a running scan is, reported by the server for the progress bar. */
+export type ScanStage =
+  'queued' | 'checking' | 'loading' | 'crawling' | 'exploring' | 'reviewing' | 'done' | 'error';
+
 /** One row of the history sidebar, as returned by GET /scans?ids=... */
 export interface ScanSummary {
   id: string;

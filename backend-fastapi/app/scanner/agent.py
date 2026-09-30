@@ -42,6 +42,7 @@ class Recorder(Protocol):
     """Writes steps to the run's timeline; implemented by runner.Reporter."""
 
     async def step(self, kind: str, label: str, **fields: Any) -> None: ...
+    async def advance(self, stage: str, completion: float) -> None: ...
 
 
 _NO_ARGS = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
@@ -288,6 +289,8 @@ class ExplorationAgent:
                     }
                 )
                 finished = finished or done
+            budget = max(1, self.settings.max_agent_steps)
+            await self.recorder.advance("exploring", 0.25 + 0.63 * min(1.0, self.steps / budget))
 
             if finished or self._exhausted():
                 return

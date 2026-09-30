@@ -45,6 +45,11 @@ from .usage import UsageTracker
 log = logging.getLogger(__name__)
 
 
+# Share of the progress bar given to Claude's exploration, the longest stage.
+EXPLORE_FROM = 0.25
+EXPLORE_TO = 0.88
+
+
 class ScanFailedError(RuntimeError):
     pass
 
@@ -122,6 +127,12 @@ class Reporter:
         log.info("scan %s: [%s] %s", self.scan.id, kind, label)
         await self.save()
 
+    async def advance(self, stage: str, completion: float) -> None:
+        """Move the progress bar. Never backwards, never past 1."""
+        self.scan.stage = stage
+        self.scan.completion = round(min(1.0, max(self.scan.completion, completion)), 3)
+        await self.save()
+
     async def progress(self, message: str, kind: str = "info") -> None:
         status = {"warning": "warning", "finding": "finding"}.get(kind, "info")
         await self.step("stage", message, status=status)
@@ -192,6 +203,7 @@ class ScanRunner:
                 timeout=settings.scan_timeout_seconds + 60,
             )
             scan.status = "done"
+            scan.stage, scan.completion = "done", 1.0
         except TimeoutError:
             scan.notes.append("The scan hit its time limit, so these results are partial.")
             scan.findings = scan.findings or _apply_options(collector.items, scan.options)
@@ -207,6 +219,10 @@ class ScanRunner:
             scan.status = "error"
             scan.error = "The scan hit an unexpected problem. Any results found are shown."
         finally:
+            if scan.status == "error":
+                scan.stage = "error"
+            elif scan.status == "done":
+                scan.stage, scan.completion = "done", 1.0
             scan.usage = usage.usage
             scan.finished_at = utcnow()
             await reporter.save()
@@ -223,6 +239,8 @@ class ScanRunner:
         guard = TargetGuard(settings.allow_private_targets)
         observations = ObservationLog()
 
+        scan.agent_budget = settings.max_agent_steps
+        await reporter.advance("checking", 0.02)
         await reporter.progress("Checking the address is safe to test")
         target = await guard.check_url(scan.target_url)
 
@@ -236,6 +254,7 @@ class ScanRunner:
             if options.check_accessibility and not session.accessibility_available:
                 scan.notes.append("Accessibility checks were unavailable for this scan.")
 
+            await reporter.advance("loading", 0.05)
             await reporter.progress(f"Opening {target}")
             try:
                 status = await session.open(target)
@@ -259,7 +278,9 @@ class ScanRunner:
             # Deterministic evidence first: it is cheap, fast, and cannot hallucinate.
             visited = {page_key(u) for u in session.visited}
             others = [u for u in session.links if page_key(u) not in visited]
-            for url in others[: options.max_pages - 1]:
+            crawl = others[: options.max_pages - 1]
+            for position, url in enumerate(crawl, start=1):
+                await reporter.advance("crawling", 0.08 + 0.08 * position / len(crawl))
                 if time.monotonic() > deadline - 90:
                     break
                 try:
@@ -274,6 +295,7 @@ class ScanRunner:
                     )
 
             if session.links:
+                await reporter.advance("crawling", 0.16)
                 await reporter.progress("Following links to find dead ends")
                 await session.check_links(settings.max_link_checks)
 
@@ -306,6 +328,7 @@ class ScanRunner:
                     url=start_url,
                     shot=await _safe_shot(session),
                 )
+                await reporter.advance("exploring", EXPLORE_FROM)
                 await agent.run(brief_automated(collector.items))
             except anthropic.APIError as exc:
                 log.warning("agent stopped: %s", exc)
@@ -319,6 +342,7 @@ class ScanRunner:
         findings = list(collector.items)
         suppressed, summary = [], None
         if findings:
+            await reporter.advance("reviewing", EXPLORE_TO)
             await reporter.progress("Double-checking every finding against its evidence")
             try:
                 findings, suppressed, summary = await review_findings(
@@ -341,6 +365,7 @@ class ScanRunner:
                 f"Filtered out {len(suppressed)} finding(s) as duplicates or likely noise"
             )
         await reporter.progress("Report ready")
+        await reporter.advance("done", 1.0)
 
 
 async def _safe_shot(session: BrowserSession) -> bytes | None:

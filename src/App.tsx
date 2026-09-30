@@ -3,8 +3,18 @@ import { ScanForm } from './components/ScanForm';
 import { FindingsPanel } from './components/FindingsPanel';
 import { HistorySidebar } from './components/HistorySidebar';
 import { ThemeToggle } from './components/ThemeToggle';
+import { TopProgress } from './components/TopProgress';
+import { FinishToast, type FinishNotice } from './components/FinishToast';
 import { DEFAULT_OPTIONS } from './lib/types';
-import type { ScanOptions, ScanPhase, ScanResult, ScanSummary, TimelineStep } from './lib/types';
+import type {
+  ScanOptions,
+  ScanPhase,
+  ScanResult,
+  ScanStage,
+  ScanSummary,
+  TimelineStep,
+} from './lib/types';
+import { durationBetween, formatDuration } from './lib/time';
 import { runMockScan } from './lib/mockScan';
 import {
   deleteScan,
@@ -17,6 +27,17 @@ import {
 import { loadHistory, saveHistory, type HistoryEntry } from './lib/history';
 
 const HISTORY_REFRESH_MS = 8000;
+
+const STAGE_LABEL: Record<ScanStage, string> = {
+  queued: 'Starting',
+  checking: 'Checking the address',
+  loading: 'Opening the page',
+  crawling: 'Checking pages and links',
+  exploring: 'Claude is exploring',
+  reviewing: 'Reviewing findings',
+  done: 'Done',
+  error: 'Stopped',
+};
 
 /** "https://www.example.com/login" -> "example.com/login", for a compact heading. */
 function displayUrl(url: string): string {
@@ -39,6 +60,10 @@ export default function App() {
   const [timeline, setTimeline] = useState<TimelineStep[]>([]);
   const [target, setTarget] = useState<string>('');
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  const [stage, setStage] = useState<ScanStage>('queued');
+  const [completion, setCompletion] = useState(0);
+  const [notice, setNotice] = useState<FinishNotice | null>(null);
+  const closeNotice = useCallback(() => setNotice(null), []);
 
   const [history, setHistory] = useState<HistoryEntry[]>(loadHistory);
   const [summaries, setSummaries] = useState<Record<string, ScanSummary>>({});
@@ -151,12 +176,16 @@ export default function App() {
     setTimeline([]);
     setResult(null);
     setError(null);
+    setStage('queued');
+    setCompletion(0);
+    setNotice(null);
   }
 
   /** Follow a scan to completion, whether just started or reopened from history. */
   async function follow(id: string, resumed: boolean) {
     const controller = new AbortController();
     following.current = controller;
+    let watchedLive = false;
     try {
       const scan = await followScan(
         id,
@@ -164,7 +193,10 @@ export default function App() {
           setProgress(update.progress);
           setTimeline(update.timeline);
           setTarget(update.targetUrl);
+          setStage(update.stage);
+          setCompletion((previous) => Math.max(previous, update.completion));
           if (update.status === 'running' || update.status === 'queued') {
+            watchedLive = true;
             if (resumed && update.startedAt) setRunStartedAt(Date.parse(update.startedAt));
             setPhase('running');
           }
@@ -173,8 +205,24 @@ export default function App() {
       );
       setResult(scan);
       setPhase('done');
+      if (watchedLive) {
+        const bugs = scan.findings.filter((f) => f.category === 'bug').length;
+        const took = durationBetween(scan.startedAt, scan.finishedAt);
+        setNotice({
+          ok: true,
+          title: `Test finished${took !== null ? ` in ${formatDuration(took)}` : ''}`,
+          detail: `${displayUrl(scan.targetUrl)}: ${bugs} broken, ${scan.findings.length - bugs} to improve.`,
+        });
+      }
     } catch (cause) {
       if (controller.signal.aborted) return; // the user moved on to another scan
+      if (watchedLive) {
+        setNotice({
+          ok: false,
+          title: 'The test stopped',
+          detail: cause instanceof Error ? cause.message : 'Something went wrong.',
+        });
+      }
       setError(cause instanceof Error ? cause.message : 'Unknown failure.');
       setPhase('error');
     } finally {
@@ -269,8 +317,32 @@ export default function App() {
     />
   );
 
+  // The tab title carries the status too, so a finished test shows up in another tab.
+  const defaultTitle = useRef(document.title);
+  useEffect(() => {
+    const site = displayUrl(target);
+    if (phase === 'running') {
+      document.title = `(${Math.round(completion * 100)}%) Testing ${site}`;
+    } else if (phase === 'done' && result) {
+      document.title = `\u2713 Done: ${site}`;
+    } else if (phase === 'error') {
+      document.title = `\u2715 Stopped: ${site}`;
+    } else {
+      document.title = defaultTitle.current;
+    }
+  }, [phase, completion, target, result]);
+
   return (
     <div className="flex min-h-full">
+      <TopProgress phase={phase} completion={completion} />
+      <FinishToast
+        notice={notice}
+        onClose={closeNotice}
+        onView={() => {
+          setNotice(null);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
       {isLiveApi ? (
         <>
           {/* Desktop: a rail that collapses to an icon strip rather than disappearing,
@@ -411,6 +483,14 @@ export default function App() {
                 <span className="truncate text-[14px] text-ink" title={target}>
                   {displayUrl(target)}
                 </span>
+                {phase === 'running' ? (
+                  <span className="hidden flex-none text-[12.5px] text-faint sm:inline">
+                    {STAGE_LABEL[stage]} &middot;{' '}
+                    <span className="font-mono text-accent tabular-nums">
+                      {Math.round(completion * 100)}%
+                    </span>
+                  </span>
+                ) : null}
               </p>
               {/* Desktop has New test in the sidebar; smaller screens and the
                   placeholder build (no sidebar) need a way back here. */}

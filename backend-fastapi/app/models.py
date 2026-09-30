@@ -29,6 +29,10 @@ Kind = Literal[
     "content",
 ]
 ScanStatus = Literal["queued", "running", "done", "error"]
+# Where a running scan is, for the progress bar. Ordered as they happen.
+ScanStage = Literal[
+    "queued", "checking", "loading", "crawling", "exploring", "reviewing", "done", "error"
+]
 
 SEVERITY_ORDER: dict[str, int] = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
@@ -157,6 +161,11 @@ class Scan(ApiModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     progress: list[ProgressEvent] = Field(default_factory=list)
+    stage: ScanStage = "queued"
+    # 0.0 to 1.0, only ever increasing. Exploration moves it with each action
+    # against the step budget; the other stages have fixed weights.
+    completion: float = 0.0
+    agent_budget: int = 0
     timeline: list[TimelineStep] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     suppressed: list[SuppressedFinding] = Field(default_factory=list)

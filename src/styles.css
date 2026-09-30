@@ -97,6 +97,7 @@ html[data-theme='light'] {
   --animate-rise: rise 0.3s ease both;
   --animate-pop: pop 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
   --animate-fade: fade 0.16s ease-out both;
+  --animate-shimmer: shimmer 1.3s linear infinite;
 }
 
 @keyframes bob {
@@ -187,5 +188,14 @@ html[data-theme='light'] {
   }
   to {
     opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
   }
 }

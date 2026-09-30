@@ -228,6 +228,9 @@ class _Nothing:
     async def step(self, *args, **kwargs) -> None:
         return None
 
+    async def advance(self, *args, **kwargs) -> None:
+        return None
+
     async def save_jpeg(self, key: str, data: bytes) -> None:
         return None
 

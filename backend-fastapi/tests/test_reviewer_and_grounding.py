@@ -95,6 +95,9 @@ class _FakeRecorder:
     async def step(self, kind: str, label: str, **fields: object) -> None:
         self.steps.append((kind, label, fields))
 
+    async def advance(self, stage: str, completion: float) -> None:
+        return None
+
 
 class _FakeArtifacts:
     def __init__(self) -> None:

@@ -80,6 +80,9 @@ class _Recorder:
     async def step(self, kind: str, label: str, **fields: object) -> None:
         self.steps.append((kind, label, fields))
 
+    async def advance(self, stage: str, completion: float) -> None:
+        return None
+
 
 async def test_click_is_recorded_with_before_after_frames_and_the_reason() -> None:
     recorder = _Recorder()
@@ -151,3 +154,14 @@ def test_links_are_signed_for_the_regional_s3_endpoint() -> None:
     # The global endpoint 307-redirects for non-us-east-1 buckets, breaking the signature.
     store = S3ArtifactStore("bucket-name", "ap-southeast-2")
     assert store._s3.meta.endpoint_url == "https://s3.ap-southeast-2.amazonaws.com"
+
+
+async def test_progress_only_moves_forward_and_is_persisted() -> None:
+    scan, store = _scan(), MemoryScanStore()
+    reporter = Reporter(scan, store, _Artifacts())
+    await reporter.advance("exploring", 0.5)
+    await reporter.advance("exploring", 0.4)  # a late, smaller update must not rewind the bar
+    await reporter.advance("done", 1.7)
+    stored = await store.get(scan.id)
+    assert stored.stage == "done"
+    assert stored.completion == 1.0
