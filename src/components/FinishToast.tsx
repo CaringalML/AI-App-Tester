@@ -12,11 +12,9 @@ export interface FinishNotice {
  */
 export function FinishToast({
   notice,
-  onView,
   onClose,
 }: {
   notice: FinishNotice | null;
-  onView: () => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -54,13 +52,6 @@ export function FinishToast({
           <div className="min-w-0 flex-1">
             <p className="text-[13.5px] font-semibold tracking-tight">{notice.title}</p>
             <p className="mt-0.5 text-[12.5px] text-muted">{notice.detail}</p>
-            <button
-              type="button"
-              onClick={onView}
-              className="mt-2 rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-ink transition hover:brightness-110"
-            >
-              View results
-            </button>
           </div>
           <button
             type="button"

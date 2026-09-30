@@ -335,14 +335,7 @@ export default function App() {
   return (
     <div className="flex min-h-full">
       <TopProgress phase={phase} completion={completion} />
-      <FinishToast
-        notice={notice}
-        onClose={closeNotice}
-        onView={() => {
-          setNotice(null);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
-      />
+      <FinishToast notice={notice} onClose={closeNotice} />
       {isLiveApi ? (
         <>
           {/* Desktop: a rail that collapses to an icon strip rather than disappearing,
