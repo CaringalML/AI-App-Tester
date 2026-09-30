@@ -1,6 +1,18 @@
 """Markdown export, shaped to paste straight into a GitHub issue or a ticket."""
 
+import re
+
 from .models import SEVERITY_ORDER, Finding, Scan
+
+
+def _fence(text: str) -> str:
+    """A code fence longer than any backtick run in `text`, so the text cannot close it.
+
+    Evidence quotes the tested site (console messages, page text); without this,
+    a ``` in it would end the block and the rest would render as report markdown.
+    """
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    return "`" * max(3, longest + 1)
 
 
 def _finding_md(finding: Finding) -> str:
@@ -19,9 +31,9 @@ def _finding_md(finding: Finding) -> str:
         "",
         "**What happened**",
         "",
-        "```text",
+        f"{_fence(finding.evidence)}text",
         finding.evidence,
-        "```",
+        _fence(finding.evidence),
         "",
         f"**Suggested fix:** {finding.suggestion}",
     ]
@@ -35,9 +47,9 @@ def _finding_md(finding: Finding) -> str:
             "",
             f"**Regression test** (Playwright, {verdict})",
             "",
-            "```ts",
+            f"{_fence(finding.playwright_test)}ts",
             finding.playwright_test.rstrip(),
-            "```",
+            _fence(finding.playwright_test),
         ]
     if finding.screenshot_url:
         lines += ["", f"[Screenshot at the time of the finding]({finding.screenshot_url})"]

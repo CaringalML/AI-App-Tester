@@ -3,11 +3,13 @@
 Two threats matter here:
 
 1. Server-side request forgery. The scanner runs inside AWS, so a request to
-   169.254.169.254 or a 10.x address would reach the metadata service or the
-   VPC instead of the internet. `TargetGuard` resolves every hostname and
-   refuses anything that is not a public address. The browser consults it for
-   every request it makes, not just the first URL, so a redirect or a link
-   pointing inward is blocked too.
+   169.254.170.2 or a 10.x address would reach the task metadata service or
+   the VPC instead of the internet. `TargetGuard` resolves every hostname and
+   refuses anything that is not a public address. It checks the address a
+   scan starts from and the first URL of every request the browser makes; the
+   browser's traffic also runs through `scanner.egress.EgressProxy`, which
+   applies the same rule to every connection, so a redirect, a frame or a
+   WebSocket pointing inward is refused too.
 
 2. Cost abuse. Each scan spends real Claude tokens. `RateLimiter` caps scans
    per client address, and the runner caps concurrent scans.
@@ -21,7 +23,7 @@ import time
 from collections import defaultdict, deque
 from urllib.parse import urlsplit, urlunsplit
 
-_BLOCKED_HOSTNAMES = {"metadata.google.internal", "metadata", "instance-data"}
+BLOCKED_HOSTNAMES = {"metadata.google.internal", "metadata", "instance-data"}
 
 
 class TargetNotAllowedError(ValueError):
@@ -84,11 +86,11 @@ class TargetGuard:
 
         if self.allow_private:
             allowed = True
-        elif host in _BLOCKED_HOSTNAMES or host.endswith(".internal"):
+        elif host in BLOCKED_HOSTNAMES or host.endswith(".internal"):
             allowed = False
         else:
             try:
-                addresses = [host] if _is_ip_literal(host) else await self._resolve(host)
+                addresses = [host] if is_ip_literal(host) else await self._resolve(host)
                 allowed = bool(addresses) and all(is_public_address(a) for a in addresses)
             except (OSError, ValueError):
                 allowed = False
@@ -109,7 +111,7 @@ class TargetGuard:
         return normalized
 
 
-def _is_ip_literal(host: str) -> bool:
+def is_ip_literal(host: str) -> bool:
     try:
         ipaddress.ip_address(host)
     except ValueError:

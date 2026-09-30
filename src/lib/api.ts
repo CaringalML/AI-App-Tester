@@ -22,6 +22,8 @@ export const isLiveApi = Boolean(API_URL);
 
 const POLL_MS = 1500;
 const GIVE_UP_MS = 8 * 60 * 1000;
+/** Consecutive 5xx polls (about 12 seconds' worth) before a scan is reported as lost. */
+const MAX_SERVER_ERRORS = 8;
 
 interface ApiScan extends Omit<ScanResult, 'pagesVisited'> {
   status: ScanStatus;
@@ -103,6 +105,7 @@ export async function followScan(
 ): Promise<ScanResult> {
   const giveUpAt = Date.now() + GIVE_UP_MS;
   let first = true;
+  let serverErrors = 0;
   while (Date.now() < giveUpAt) {
     if (!first) await wait(POLL_MS);
     first = false;
@@ -115,7 +118,14 @@ export async function followScan(
       if (signal?.aborted) throw cause;
       continue; // a dropped poll is not a failed scan; try again next tick
     }
-    if (!response.ok) throw new ScanError(await readError(response));
+    if (!response.ok) {
+      // Cloudflare or the load balancer can fail a single poll (502, 503, 504)
+      // while the scan carries on, so a few in a row are retried before giving up.
+      const transient = response.status >= 500 || response.status === 429;
+      if (transient && ++serverErrors < MAX_SERVER_ERRORS) continue;
+      throw new ScanError(await readError(response));
+    }
+    serverErrors = 0;
 
     const scan = (await response.json()) as ApiScan;
     if (signal?.aborted) throw new DOMException('Stopped following this scan', 'AbortError');

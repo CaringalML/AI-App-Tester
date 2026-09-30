@@ -135,6 +135,31 @@ async def test_finished_scan_exports_markdown(parts) -> None:
 
     report = client.get(f"/scans/{scan.id}/report.md")
     assert report.status_code == 200
+    assert report.headers["x-content-type-options"] == "nosniff"
     assert "## Broken" in report.text
     assert "1. Open /signup" in report.text
     assert render_markdown(scan).startswith("# AI App Tester report")
+
+
+def test_page_text_cannot_close_the_evidence_block() -> None:
+    finding = Finding(
+        id="f-1",
+        title="Console error",
+        category="bug",
+        severity="medium",
+        confidence="high",
+        kind="console",
+        source="automated",
+        location="/",
+        evidence="Logged: ```\n## Fake heading from the page\n```",
+        steps=["Open /"],
+        suggestion="Fix it.",
+    )
+    scan = Scan(
+        id="b" * 32, target_url="https://app.example/", status="done", options={}, model="m"
+    )
+    scan.findings.append(finding)
+    report = render_markdown(scan)
+    # The block opens with a longer fence than any run inside it, so the page's
+    # own ``` lines stay text instead of ending the block.
+    assert "````text\nLogged: ```\n## Fake heading from the page\n```\n````" in report

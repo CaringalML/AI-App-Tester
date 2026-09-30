@@ -100,6 +100,15 @@ def create_app(
         allow_headers=["Content-Type", "X-Owner-Token"],
         max_age=600,
     )
+
+    @app.middleware("http")
+    async def no_sniff(request: Request, call_next):  # noqa: ANN001, ANN202
+        response = await call_next(request)
+        # Reports and test exports carry text from the tested site; a browser must
+        # show them as the type they are declared as, never sniff them into HTML.
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        return response
+
     if isinstance(artifacts, LocalArtifactStore):
         app.mount("/artifacts", StaticFiles(directory=artifacts.root), name="artifacts")
 

@@ -9,8 +9,10 @@ The code is assembled here, never written by the model:
   finding: one checkable fact from a fixed set, such as "this text should be
   visible". The server renders it to `expect(...)`.
 
-Because model output only ever fills typed fields that are escaped into string
-literals, a page cannot prompt-inject executable code into the exported test.
+Model output and page text only ever land in two places: string literals, via
+`js()`, and single-line comments, via `_comment()`, which removes every line
+terminator JavaScript recognises. Nothing can end the literal or the comment it
+sits in, so a page cannot prompt-inject executable code into the exported test.
 
 A test asserts the *correct* behaviour, so it fails while the bug exists and
 passes once it is fixed. Where the expectation can be checked against the page
@@ -38,8 +40,13 @@ EXPECTATION_TYPES = [
 
 
 def js(value: str) -> str:
-    """A JavaScript string literal. JSON strings are valid JS string literals."""
-    return json.dumps(value, ensure_ascii=False)
+    """A JavaScript string literal. JSON strings are valid JS string literals.
+
+    U+2028 and U+2029 are escaped too: JSON allows them raw, but JavaScript
+    treats them as line breaks, which matters wherever a literal sits in a comment.
+    """
+    literal = json.dumps(value, ensure_ascii=False)
+    return literal.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 
 def js_regex_source(text: str) -> str:
@@ -97,7 +104,7 @@ class TestAction:
             case "select" if target:
                 return f"await {target}.selectOption({js(self.value)});"
         # No locator matched exactly one element; say so instead of guessing.
-        return f"// TODO: {self.kind} {js(self.label)}: no unique locator was found for it"
+        return f"// TODO: {self.kind} {_comment(self.label)}: no unique locator was found for it"
 
     @property
     def replayable(self) -> bool:
@@ -133,7 +140,7 @@ class Expectation:
                 return [f"await expect({target}).toContainText({js(text)});"]
             case "no_console_errors":
                 return ["expect(errors).toEqual([]);"]
-        return [f"// TODO: assert that {self.description or 'the issue is fixed'}"]
+        return [f"// TODO: assert that {_comment(self.description or 'the issue is fixed')}"]
 
     @property
     def checkable(self) -> bool:
@@ -149,6 +156,11 @@ class GeneratedTest:
 
 
 def _comment(text: str) -> str:
+    """Text safe inside a `//` comment: one line, whatever it contained.
+
+    str.split() breaks on every JavaScript line terminator (\\n, \\r, U+2028,
+    U+2029), so none survive to end the comment early.
+    """
     return " ".join(text.split())[:200]
 
 

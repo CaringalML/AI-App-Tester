@@ -28,6 +28,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
 from ..security import TargetGuard
+from .egress import EgressProxy
 from .observations import ObservationLog
 
 log = logging.getLogger(__name__)
@@ -132,7 +133,7 @@ class ActionOutcome:
 # recommend. Checked for uniqueness in Python before one is used.
 _LOCATOR_CANDIDATES_JS = """
 (el) => {
-  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
   const tag = el.tagName.toLowerCase();
   const type = (el.getAttribute('type') || '').toLowerCase();
   let role = el.getAttribute('role');
@@ -159,9 +160,9 @@ _LOCATOR_CANDIDATES_JS = """
   if (label && label.length <= 80) out.push({ kind: 'label', value: label });
   const placeholder = el.getAttribute('placeholder');
   if (placeholder) out.push({ kind: 'placeholder', value: placeholder });
-  if (el.id && /^[A-Za-z][\w-]*$/.test(el.id)) out.push({ kind: 'css', value: '#' + el.id });
+  if (el.id && /^[A-Za-z][\\w-]*$/.test(el.id)) out.push({ kind: 'css', value: '#' + el.id });
   const nameAttr = el.getAttribute('name');
-  if (nameAttr && /^[\w-]+$/.test(nameAttr)) out.push({ kind: 'css', value: `${tag}[name="${nameAttr}"]` });
+  if (nameAttr && /^[\\w-]+$/.test(nameAttr)) out.push({ kind: 'css', value: `${tag}[name="${nameAttr}"]` });
   if (ownText && ownText.length <= 60) out.push({ kind: 'text', value: ownText });
   return out;
 }
@@ -188,6 +189,8 @@ class BrowserSession:
         axe_path: str,
     ) -> None:
         self.guard = guard
+        # Every connection Chromium makes goes through this; see egress.py for why.
+        self.egress = EgressProxy(guard.allow_private)
         self.log = log_
         self.accessibility = accessibility
         self.axe_source = _load_axe(axe_path) if accessibility else None
@@ -205,9 +208,18 @@ class BrowserSession:
         return self.axe_source is not None
 
     async def __aenter__(self) -> "BrowserSession":
+        proxy_url = await self.egress.start()
         self._pw = await async_playwright().start()
         # Fargate's /dev/shm is tiny; without this Chromium crashes on heavy pages.
-        self._browser = await self._pw.chromium.launch(args=["--disable-dev-shm-usage"])
+        # Playwright also routes loopback through a configured proxy, and WebRTC is
+        # kept off direct UDP, so no connection goes around the egress proxy.
+        self._browser = await self._pw.chromium.launch(
+            args=[
+                "--disable-dev-shm-usage",
+                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+            ],
+            proxy={"server": proxy_url},
+        )
         self._context = await self._browser.new_context(
             viewport=VIEWPORT,
             user_agent=None,
@@ -234,6 +246,7 @@ class BrowserSession:
                     pass
         if self._pw is not None:
             await self._pw.stop()
+        await self.egress.close()
 
     # ---- evidence capture -------------------------------------------------
 
@@ -243,10 +256,19 @@ class BrowserSession:
         if scheme in ("data", "blob", "about", "chrome-extension"):
             await route.continue_()
             return
-        if await self.guard.is_allowed_host(urlsplit(url).hostname):
-            await route.continue_()
-        else:
+        host = urlsplit(url).hostname
+        if not host:
             await route.abort("blockedbyclient")
+            return
+        # The egress proxy decides for every connection; asking it here fails a
+        # refused request before Chromium even connects. A name that does not
+        # resolve is not refused: it fails on its own and is reported as
+        # unreachable, which for a third-party script is a real finding.
+        await self.egress.addresses(host)
+        if self.egress.is_refused(host):
+            await route.abort("blockedbyclient")
+        else:
+            await route.continue_()
 
     def _attach_listeners(self, page: Page) -> None:
         page.on("console", self._on_console)
@@ -280,11 +302,19 @@ class BrowserSession:
 
     def _on_request_failed(self, request: Request) -> None:
         failure = request.failure or "unknown failure"
-        if "ERR_BLOCKED_BY_CLIENT" in failure:
+        host = urlsplit(request.url).hostname
+        # Refused by the route guard or the egress proxy: the scanner's own safety
+        # rule at work, not a defect in the site.
+        if "ERR_BLOCKED_BY_CLIENT" in failure or self.egress.is_refused(host):
             self.log.add("blocked-request", self._current(), f"Blocked request to {request.url}")
             return
         if "ERR_ABORTED" in failure:
             return  # navigations cancelled by the next navigation, not a defect
+        # A host the proxy could not reach fails in Chromium as a proxy error; report
+        # the real reason, the way Chromium would without a proxy.
+        proxy_failure = self.egress.failures.get((host or "").lower())
+        if proxy_failure and ("TUNNEL" in failure or "EMPTY_RESPONSE" in failure):
+            failure = proxy_failure
         self.log.add(
             "request-failed",
             self._current(),
@@ -331,7 +361,26 @@ class BrowserSession:
 
     async def open(self, url: str) -> int | None:
         assert self.page is not None
-        response = await self.page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+        refused_before = len(self.egress.refused)
+        try:
+            response = await self.page.goto(
+                url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
+            )
+        except PlaywrightError as exc:
+            # goto rejects as soon as the request fails, but Chromium commits its
+            # error page a moment later; wait for it, or that late commit cancels
+            # whatever navigation comes next and makes a good page look broken.
+            try:
+                await self.page.wait_for_url("chrome-error://**", timeout=1_000)
+            except PlaywrightError:
+                pass
+            refused = self.egress.refused[refused_before:]
+            if refused:
+                raise PlaywrightError(
+                    f"it redirected to {refused[0]}, a private or reserved address, "
+                    "which the tester does not open"
+                ) from exc
+            raise
         if self.site is None:
             self.site = site_key(self.page.url)
         await self.settle()
@@ -391,17 +440,15 @@ class BrowserSession:
             if page_key(link) not in visited_keys
         ][:limit]
         for link, found_on in candidates:
-            if not await self.guard.is_allowed_host(urlsplit(link).hostname):
-                continue
             try:
-                response = await self._context.request.get(link, timeout=8_000, max_redirects=5)
-                status = response.status
-                await response.dispose()
+                status = await self._link_status(link)
             except PlaywrightError as exc:
                 self.log.add(
                     "broken-link", found_on, f"{link} could not be fetched: {exc}", url=link
                 )
                 continue
+            if status is None:
+                continue  # it leads somewhere the scanner does not go
             if status >= 400:
                 self.log.add(
                     "broken-link",
@@ -410,6 +457,26 @@ class BrowserSession:
                     url=link,
                     status=status,
                 )
+
+    async def _link_status(self, link: str, max_hops: int = 5) -> int | None:
+        """Final HTTP status of a link, following redirects one hop at a time.
+
+        The request API follows redirects outside the browser, where neither the
+        route guard nor the egress proxy would see the hops, so each hop's host is
+        checked here. None when a hop points somewhere the scanner does not go.
+        """
+        assert self._context is not None
+        url = link
+        for _ in range(max_hops + 1):
+            if not await self.guard.is_allowed_host(urlsplit(url).hostname):
+                return None
+            response = await self._context.request.get(url, timeout=8_000, max_redirects=0)
+            status, location = response.status, response.headers.get("location")
+            await response.dispose()
+            if not (300 <= status < 400 and location):
+                return status
+            url = urljoin(url, location)
+        return status
 
     async def screenshot(self) -> bytes:
         assert self.page is not None
