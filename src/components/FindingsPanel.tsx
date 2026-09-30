@@ -74,12 +74,15 @@ export function FindingsPanel({
     runnerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  // In the order they happened, matching the command log; severity breaks ties,
+  // and anything without a step goes last.
   const sorted = useMemo(() => {
     if (!result) return [];
+    const at = (finding: Finding) => stepFor(finding)?.index ?? Number.MAX_SAFE_INTEGER;
     return [...result.findings].sort(
-      (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
+      (a, b) => at(a) - at(b) || SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
     );
-  }, [result]);
+  }, [result, steps]); // stepFor reads only steps
 
   const visible = sorted.filter((finding) => filter === 'all' || finding.category === filter);
   const bugCount = sorted.filter((finding) => finding.category === 'bug').length;
@@ -242,6 +245,7 @@ export function FindingsPanel({
                   key={finding.id}
                   finding={finding}
                   step={step?.index}
+                  targetUrl={result?.targetUrl}
                   onShowInReplay={step ? () => showInReplay(step) : undefined}
                 />
               );

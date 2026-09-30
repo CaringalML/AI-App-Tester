@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { findingAsIssue } from '../lib/issue';
 import type { Finding, Severity } from '../lib/types';
 import { LinkedText } from './LinkedText';
 import { RegressionTest } from './RegressionTest';
@@ -39,28 +40,60 @@ const BADGE_BASE =
 export function FindingCard({
   finding,
   step,
+  targetUrl,
   onShowInReplay,
 }: {
   finding: Finding;
+  /** The tested site, so the copied issue links the exact page. */
+  targetUrl?: string;
   /** The command log step that shows this finding, numbered as in the log. */
   step?: number;
   /** Present when the replay has a step that shows this finding happening. */
   onShowInReplay?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle');
+  useEffect(() => {
+    if (copied === 'idle') return;
+    const timer = setTimeout(() => setCopied('idle'), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  async function copyIssue() {
+    try {
+      await navigator.clipboard.writeText(findingAsIssue(finding, { targetUrl, step }));
+      setCopied('done');
+    } catch {
+      setCopied('failed');
+    }
+  }
+
+  const copyLabel =
+    copied === 'done' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy as issue';
 
   return (
     <article className="relative min-w-0 overflow-hidden rounded-[11px] border border-line bg-raised transition-colors hover:border-line-strong">
       {/* Outside the header button, since a button cannot hold another button. */}
-      {step !== undefined && onShowInReplay ? (
+      <div className="absolute top-3.5 right-11 flex items-center gap-1.5">
         <button
           type="button"
-          onClick={onShowInReplay}
-          title={`Show step ${step} of the command log in the replay`}
-          className="absolute top-3.5 right-11 flex items-center gap-1 rounded-full border border-line-strong bg-bg px-2 py-0.5 font-mono text-[11px] text-muted transition hover:border-accent/50 hover:text-accent"
+          onClick={copyIssue}
+          aria-label={copied === 'done' ? 'Issue copied' : 'Copy as a Markdown issue'}
+          title={
+            copied === 'done'
+              ? 'Copied. Paste it into GitHub, Jira or Slack'
+              : 'Copy as a Markdown issue for GitHub, Jira or Slack'
+          }
+          className={`grid size-6.5 place-items-center rounded-full border bg-bg transition ${
+            copied === 'done'
+              ? 'border-success/50 text-success'
+              : copied === 'failed'
+                ? 'border-critical/50 text-critical'
+                : 'border-line-strong text-muted hover:border-accent/50 hover:text-accent'
+          }`}
         >
           <svg
-            className="size-3"
+            className="size-3.5"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -69,11 +102,39 @@ export function FindingCard({
             strokeLinejoin="round"
             aria-hidden="true"
           >
-            <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" />
+            {copied === 'done' ? (
+              <path d="M5 12.5l4.5 4.5L19 7.5" />
+            ) : (
+              <>
+                <rect x="9" y="9" width="11" height="11" rx="2" />
+                <path d="M5 15V6a2 2 0 0 1 2-2h8" />
+              </>
+            )}
           </svg>
-          Step {step}
         </button>
-      ) : null}
+        {step !== undefined && onShowInReplay ? (
+          <button
+            type="button"
+            onClick={onShowInReplay}
+            title={`Show step ${step} of the command log in the replay`}
+            className="flex items-center gap-1 rounded-full border border-line-strong bg-bg px-2 py-0.5 font-mono text-[11px] text-muted transition hover:border-accent/50 hover:text-accent"
+          >
+            <svg
+              className="size-3"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" />
+            </svg>
+            Step {step}
+          </button>
+        ) : null}
+      </div>
       <button
         type="button"
         className="flex w-full items-start gap-3 p-4 text-left"
@@ -86,7 +147,9 @@ export function FindingCard({
         />
 
         <span className="min-w-0 flex-1">
-          <span className={`mb-1.5 flex flex-wrap gap-1.5 ${step !== undefined ? 'pr-20' : ''}`}>
+          <span
+            className={`mb-1.5 flex flex-wrap gap-1.5 ${step !== undefined ? 'pr-28' : 'pr-8'}`}
+          >
             <span
               className={`${BADGE_BASE} ${
                 finding.category === 'bug'
@@ -203,15 +266,24 @@ export function FindingCard({
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-bg px-3 py-2.25 text-[12.5px] text-faint">
             <span>{CONFIDENCE_NOTE[finding.confidence]}</span>
-            {onShowInReplay ? (
+            <span className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={onShowInReplay}
-                className="rounded-md border border-accent/40 px-2.5 py-1 text-[12px] text-accent transition hover:bg-accent/10"
+                onClick={copyIssue}
+                className="rounded-md border border-line-strong px-2.5 py-1 text-[12px] text-muted transition hover:border-accent/40 hover:text-ink"
               >
-                {step !== undefined ? `Show step ${step} in replay` : 'Show in replay'}
+                {copyLabel}
               </button>
-            ) : null}
+              {onShowInReplay ? (
+                <button
+                  type="button"
+                  onClick={onShowInReplay}
+                  className="rounded-md border border-accent/40 px-2.5 py-1 text-[12px] text-accent transition hover:bg-accent/10"
+                >
+                  {step !== undefined ? `Show step ${step} in replay` : 'Show in replay'}
+                </button>
+              ) : null}
+            </span>
           </div>
         </div>
       ) : null}
