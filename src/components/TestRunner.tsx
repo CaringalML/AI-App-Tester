@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TimelineStep } from '../lib/types';
 import { formatDuration, useElapsed } from '../lib/time';
+import { CopyButton } from './CopyButton';
 import { StepTimeline } from './StepTimeline';
 
 /*
@@ -298,13 +299,24 @@ export function TestRunner({
             {step ? (
               <>
                 <span className="font-mono text-faint">#{step.index}</span> {step.why ?? step.label}
+                <CopyButton
+                  key={`text-${step.index}`}
+                  text={step.why ?? step.label}
+                  label="the step text"
+                  className="ml-1 size-5.5 translate-y-[3px] align-baseline"
+                />
                 {step.code ? (
-                  <code
-                    className="mt-1 block truncate font-mono text-[11px] text-low"
-                    title={step.code}
-                  >
-                    {step.code}
-                  </code>
+                  <span className="mt-1 flex min-w-0 items-center gap-1">
+                    <code className="truncate font-mono text-[11px] text-low" title={step.code}>
+                      {step.code}
+                    </code>
+                    <CopyButton
+                      key={`code-${step.index}`}
+                      text={step.code}
+                      label="the Playwright line"
+                      className="size-5.5 flex-none"
+                    />
+                  </span>
                 ) : null}
               </>
             ) : (
