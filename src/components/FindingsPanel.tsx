@@ -27,6 +27,15 @@ const PANEL = 'rounded-[14px] border border-line bg-surface';
 /** Idle, error and placeholder states stay form-width; the runner and results use the full width. */
 const NARROW = 'mx-auto w-full max-w-193';
 
+/** "/login" from "https://site/login?x=1"; findings give their location as a path. */
+function pathOf(url?: string | null): string | null {
+  try {
+    return url ? new URL(url).pathname : null;
+  } catch {
+    return null;
+  }
+}
+
 export function FindingsPanel({
   phase,
   progress,
@@ -43,11 +52,20 @@ export function FindingsPanel({
   const elapsed = useElapsed(runStartedAt, phase === 'running');
   const duration = result ? durationBetween(result.startedAt, result.finishedAt) : null;
 
-  /** The replay step that shows a finding: where it was reported, else its first cited action. */
+  /**
+   * The replay step that shows a finding: where it was reported, else its first
+   * cited action, else (for the browser's own checks) the step that loaded the
+   * page it was found on.
+   */
   function stepFor(finding: Finding): TimelineStep | undefined {
     return (
       steps.find((s) => s.findingId === finding.id) ??
-      steps.find((s) => s.actionId && finding.evidenceIds?.includes(s.actionId))
+      steps.find((s) => s.actionId && finding.evidenceIds?.includes(s.actionId)) ??
+      steps.find(
+        (s) =>
+          (s.kind === 'visit' || s.kind === 'navigate') &&
+          pathOf(s.url) === finding.location.split(/[,\s]/)[0],
+      )
     );
   }
 
@@ -223,6 +241,7 @@ export function FindingsPanel({
                 <FindingCard
                   key={finding.id}
                   finding={finding}
+                  step={step?.index}
                   onShowInReplay={step ? () => showInReplay(step) : undefined}
                 />
               );

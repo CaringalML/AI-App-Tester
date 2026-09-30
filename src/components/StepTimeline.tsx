@@ -246,7 +246,6 @@ export function StepTimeline({ steps, live, pinned, following, now, onPin, onHov
                     <li key={s.index} className="relative">
                       <button
                         type="button"
-                        title={`Step ${s.index}`}
                         onMouseEnter={() => onHover(s.index)}
                         onClick={() => onPin(selected ? null : s.index)}
                         className={`flex w-full items-start gap-2.5 border-l-2 py-1.5 pr-3.5 pl-7 text-left transition ${
@@ -264,6 +263,12 @@ export function StepTimeline({ steps, live, pinned, following, now, onPin, onHov
                         {/* Solid backing so the connector line passes behind the icon. */}
                         <span className="relative z-10 mt-0.5 grid w-4 flex-none place-items-center rounded-full bg-surface">
                           <StatusIcon status={stepStatus(s)} />
+                        </span>
+                        <span
+                          className="w-5 flex-none pt-px text-right font-mono text-[10.5px] text-faint tabular-nums"
+                          aria-label={`Step ${s.index}`}
+                        >
+                          {s.index}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-baseline gap-2">

@@ -38,16 +38,42 @@ const BADGE_BASE =
 
 export function FindingCard({
   finding,
+  step,
   onShowInReplay,
 }: {
   finding: Finding;
+  /** The command log step that shows this finding, numbered as in the log. */
+  step?: number;
   /** Present when the replay has a step that shows this finding happening. */
   onShowInReplay?: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <article className="min-w-0 overflow-hidden rounded-[11px] border border-line bg-raised transition-colors hover:border-line-strong">
+    <article className="relative min-w-0 overflow-hidden rounded-[11px] border border-line bg-raised transition-colors hover:border-line-strong">
+      {/* Outside the header button, since a button cannot hold another button. */}
+      {step !== undefined && onShowInReplay ? (
+        <button
+          type="button"
+          onClick={onShowInReplay}
+          title={`Show step ${step} of the command log in the replay`}
+          className="absolute top-3.5 right-11 flex items-center gap-1 rounded-full border border-line-strong bg-bg px-2 py-0.5 font-mono text-[11px] text-muted transition hover:border-accent/50 hover:text-accent"
+        >
+          <svg
+            className="size-3"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" />
+          </svg>
+          Step {step}
+        </button>
+      ) : null}
       <button
         type="button"
         className="flex w-full items-start gap-3 p-4 text-left"
@@ -60,7 +86,7 @@ export function FindingCard({
         />
 
         <span className="min-w-0 flex-1">
-          <span className="mb-1.5 flex flex-wrap gap-1.5">
+          <span className={`mb-1.5 flex flex-wrap gap-1.5 ${step !== undefined ? 'pr-20' : ''}`}>
             <span
               className={`${BADGE_BASE} ${
                 finding.category === 'bug'
@@ -183,7 +209,7 @@ export function FindingCard({
                 onClick={onShowInReplay}
                 className="rounded-md border border-accent/40 px-2.5 py-1 text-[12px] text-accent transition hover:bg-accent/10"
               >
-                Show in replay
+                {step !== undefined ? `Show step ${step} in replay` : 'Show in replay'}
               </button>
             ) : null}
           </div>
