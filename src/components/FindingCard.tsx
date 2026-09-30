@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { findingAsIssue } from '../lib/issue';
+import { useState, type ReactNode } from 'react';
+import { bugText, stepsText } from '../lib/copyText';
 import type { Finding, Severity } from '../lib/types';
+import { CopyButton } from './CopyButton';
 import { LinkedText } from './LinkedText';
 import { RegressionTest } from './RegressionTest';
 
@@ -34,6 +35,24 @@ const SEVERITY_BADGE: Record<Severity, string> = {
   low: 'text-low border-low/40',
 };
 
+/** A section heading with a copy button for just that section. */
+function SectionHeading({
+  children,
+  copy,
+  label,
+}: {
+  children: ReactNode;
+  copy?: () => string;
+  label?: string;
+}) {
+  return (
+    <h4 className="mb-1.25 flex items-center gap-1.5 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
+      {children}
+      {copy && label ? <CopyButton text={copy} label={label} className="size-5.5" /> : null}
+    </h4>
+  );
+}
+
 const BADGE_BASE =
   'rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize tracking-[0.01em]';
 
@@ -44,7 +63,7 @@ export function FindingCard({
   onShowInReplay,
 }: {
   finding: Finding;
-  /** The tested site, so the copied issue links the exact page. */
+  /** The tested site, so a copied bug names the exact page. */
   targetUrl?: string;
   /** The command log step that shows this finding, numbered as in the log. */
   step?: number;
@@ -52,66 +71,15 @@ export function FindingCard({
   onShowInReplay?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle');
-  useEffect(() => {
-    if (copied === 'idle') return;
-    const timer = setTimeout(() => setCopied('idle'), 2000);
-    return () => clearTimeout(timer);
-  }, [copied]);
-
-  async function copyIssue() {
-    try {
-      await navigator.clipboard.writeText(findingAsIssue(finding, { targetUrl, step }));
-      setCopied('done');
-    } catch {
-      setCopied('failed');
-    }
-  }
-
-  const copyLabel =
-    copied === 'done' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy as issue';
-
   return (
     <article className="relative min-w-0 overflow-hidden rounded-[11px] border border-line bg-raised transition-colors hover:border-line-strong">
       {/* Outside the header button, since a button cannot hold another button. */}
       <div className="absolute top-3.5 right-11 flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={copyIssue}
-          aria-label={copied === 'done' ? 'Issue copied' : 'Copy as a Markdown issue'}
-          title={
-            copied === 'done'
-              ? 'Copied. Paste it into GitHub, Jira or Slack'
-              : 'Copy as a Markdown issue for GitHub, Jira or Slack'
-          }
-          className={`grid size-6.5 place-items-center rounded-full border bg-bg transition ${
-            copied === 'done'
-              ? 'border-success/50 text-success'
-              : copied === 'failed'
-                ? 'border-critical/50 text-critical'
-                : 'border-line-strong text-muted hover:border-accent/50 hover:text-accent'
-          }`}
-        >
-          <svg
-            className="size-3.5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            {copied === 'done' ? (
-              <path d="M5 12.5l4.5 4.5L19 7.5" />
-            ) : (
-              <>
-                <rect x="9" y="9" width="11" height="11" rx="2" />
-                <path d="M5 15V6a2 2 0 0 1 2-2h8" />
-              </>
-            )}
-          </svg>
-        </button>
+        <CopyButton
+          text={() => bugText(finding, targetUrl)}
+          label={finding.category === 'bug' ? 'the bug' : 'this finding'}
+          className="size-6.5 rounded-full! border border-line-strong bg-bg"
+        />
         {step !== undefined && onShowInReplay ? (
           <button
             type="button"
@@ -216,9 +184,9 @@ export function FindingCard({
       {open ? (
         <div className="grid animate-rise gap-4 [overflow-wrap:anywhere] border-t border-line px-4.5 pt-4 pb-4.5 pl-7.75">
           <section>
-            <h4 className="mb-1.25 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
+            <SectionHeading copy={() => bugText(finding, targetUrl)} label="what happened">
               What happened
-            </h4>
+            </SectionHeading>
             <pre className="font-mono text-[12.5px] leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap text-muted">
               {finding.evidence}
             </pre>
@@ -228,9 +196,7 @@ export function FindingCard({
 
           {finding.screenshotUrl ? (
             <section>
-              <h4 className="mb-1.25 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
-                Screen at the time
-              </h4>
+              <SectionHeading>Screen at the time</SectionHeading>
               <a href={finding.screenshotUrl} target="_blank" rel="noreferrer">
                 <img
                   src={finding.screenshotUrl}
@@ -243,9 +209,9 @@ export function FindingCard({
           ) : null}
 
           <section>
-            <h4 className="mb-1.25 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
+            <SectionHeading copy={() => stepsText(finding)} label="the steps">
               How to see it yourself
-            </h4>
+            </SectionHeading>
             <ol className="grid list-decimal gap-1 pl-4.5 text-sm text-muted">
               {finding.steps.map((step, index) => (
                 <li key={index}>
@@ -256,9 +222,9 @@ export function FindingCard({
           </section>
 
           <section>
-            <h4 className="mb-1.25 text-[11.5px] font-semibold tracking-[0.06em] text-faint uppercase">
+            <SectionHeading copy={() => finding.suggestion} label="the suggested fix">
               Suggested fix
-            </h4>
+            </SectionHeading>
             <p className="text-sm text-muted">
               <LinkedText text={finding.suggestion} />
             </p>
@@ -266,24 +232,15 @@ export function FindingCard({
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-bg px-3 py-2.25 text-[12.5px] text-faint">
             <span>{CONFIDENCE_NOTE[finding.confidence]}</span>
-            <span className="flex flex-wrap gap-2">
+            {onShowInReplay ? (
               <button
                 type="button"
-                onClick={copyIssue}
-                className="rounded-md border border-line-strong px-2.5 py-1 text-[12px] text-muted transition hover:border-accent/40 hover:text-ink"
+                onClick={onShowInReplay}
+                className="rounded-md border border-accent/40 px-2.5 py-1 text-[12px] text-accent transition hover:bg-accent/10"
               >
-                {copyLabel}
+                {step !== undefined ? `Show step ${step} in replay` : 'Show in replay'}
               </button>
-              {onShowInReplay ? (
-                <button
-                  type="button"
-                  onClick={onShowInReplay}
-                  className="rounded-md border border-accent/40 px-2.5 py-1 text-[12px] text-accent transition hover:bg-accent/10"
-                >
-                  {step !== undefined ? `Show step ${step} in replay` : 'Show in replay'}
-                </button>
-              ) : null}
-            </span>
+            ) : null}
           </div>
         </div>
       ) : null}
