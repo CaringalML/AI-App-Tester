@@ -92,6 +92,8 @@ export interface TimelineStep {
   why?: string | null;
   url?: string | null;
   status: 'ok' | 'failed' | 'info' | 'warning' | 'finding';
+  /** Which part of the run: prepare, explore with Claude, or review. */
+  phase?: 'prepare' | 'explore' | 'review' | null;
   actionId?: string | null;
   findingId?: string | null;
   signals: number;

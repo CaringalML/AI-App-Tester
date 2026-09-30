@@ -54,6 +54,19 @@ class ScanFailedError(RuntimeError):
     pass
 
 
+# Stages map onto the three phases shown in the command log.
+_PHASE_OF_STAGE = {
+    "queued": "prepare",
+    "checking": "prepare",
+    "loading": "prepare",
+    "crawling": "prepare",
+    "exploring": "explore",
+    "reviewing": "review",
+    "done": "review",
+    "error": "review",
+}
+
+
 class Reporter:
     """Records the run as it happens and persists it so the frontend can follow along.
 
@@ -108,6 +121,7 @@ class Reporter:
                 at=utcnow(),
                 kind=kind,
                 label=label,
+                phase=_PHASE_OF_STAGE.get(self.scan.stage, "prepare"),
                 why=why,
                 url=url,
                 status=status,

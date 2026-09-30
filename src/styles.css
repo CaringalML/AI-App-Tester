@@ -33,6 +33,7 @@
   --medium: #e0b038;
   --low: #5b8def;
   --improve: #a78bfa;
+  --success: #3fb950;
 
   --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 28px rgb(0 0 0 / 0.28);
 }
@@ -58,6 +59,7 @@ html[data-theme='light'] {
   --medium: #b07d10;
   --low: #3b6fd4;
   --improve: #7c5cf0;
+  --success: #1a7f37;
 
   --shadow-panel: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 30px rgb(16 24 40 / 0.07);
 }
@@ -90,6 +92,7 @@ html[data-theme='light'] {
   --color-medium: var(--medium);
   --color-low: var(--low);
   --color-improve: var(--improve);
+  --color-success: var(--success);
 
   --animate-spin-fast: spin 0.7s linear infinite;
   --animate-bob: bob 1.8s ease-in-out infinite;

@@ -129,6 +129,8 @@ class TimelineStep(ApiModel):
     why: str | None = None
     url: str | None = None
     status: Literal["ok", "failed", "info", "warning", "finding"] = "ok"
+    # Which part of the run this belongs to, so the UI can group steps into phases.
+    phase: Literal["prepare", "explore", "review"] | None = None
     action_id: str | None = None
     finding_id: str | None = None
     signals: int = 0

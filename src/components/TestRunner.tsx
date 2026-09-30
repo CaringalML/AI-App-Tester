@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { StepKind, TimelineStep } from '../lib/types';
+import type { TimelineStep } from '../lib/types';
 import { formatDuration, useElapsed } from '../lib/time';
+import { StepTimeline } from './StepTimeline';
 
 /*
  * A Cypress-style runner for a scan.
@@ -26,35 +27,6 @@ interface Props {
   /** All findings once the scan is done; while live, only Claude's are known. */
   findingsTotal?: number;
 }
-
-/* Literal class names so Tailwind generates them; see FindingCard for the same pattern. */
-const KIND_STYLE: Record<StepKind, string> = {
-  stage: 'text-faint',
-  visit: 'text-low',
-  navigate: 'text-low',
-  back: 'text-muted',
-  click: 'text-accent',
-  type: 'text-improve',
-  select: 'text-improve',
-  press: 'text-muted',
-  look: 'text-medium',
-  read: 'text-faint',
-  finding: 'text-critical',
-};
-
-const KIND_LABEL: Record<StepKind, string> = {
-  stage: '',
-  visit: 'visit',
-  navigate: 'go to',
-  back: 'back',
-  click: 'click',
-  type: 'type',
-  select: 'select',
-  press: 'press',
-  look: 'look',
-  read: 'read',
-  finding: 'finding',
-};
 
 /** Swaps images only once the new one has loaded, so frames never flash blank. */
 function useLoadedImage(src: string | null | undefined): string | null {
@@ -103,7 +75,8 @@ export function TestRunner({
   const [hovered, setHovered] = useState<number | null>(null);
   const [showBefore, setShowBefore] = useState(true);
   const [idleSeconds, setIdleSeconds] = useState(0);
-  const logRef = useRef<HTMLOListElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const active = hovered ?? pinned ?? steps.length;
   const position = Math.min(Math.max(active - 1, 0), steps.length - 1);
@@ -134,7 +107,10 @@ export function TestRunner({
   const lastAt = steps.at(-1)?.at;
   useEffect(() => {
     if (!live) return;
-    const tick = () => setIdleSeconds(lastAt ? (Date.now() - Date.parse(lastAt)) / 1000 : 0);
+    const tick = () => {
+      setNow(Date.now());
+      setIdleSeconds(lastAt ? (Date.now() - Date.parse(lastAt)) / 1000 : 0);
+    };
     tick();
     const timer = setInterval(tick, 500);
     return () => clearInterval(timer);
@@ -208,87 +184,21 @@ export function TestRunner({
           </span>
         </div>
 
-        <ol
+        <div
           ref={logRef}
-          className="max-h-80 min-h-0 flex-1 overflow-y-auto py-1.5 @4xl:max-h-[34rem]"
+          className="max-h-80 min-h-0 flex-1 overflow-y-auto @4xl:max-h-[34rem]"
           onMouseLeave={() => setHovered(null)}
         >
-          {steps.map((s) => {
-            const selected = s.index === (pinned ?? -1);
-            const current = following && s.index === steps.length;
-            const stage = s.kind === 'stage';
-            return (
-              <li key={s.index}>
-                <button
-                  type="button"
-                  onMouseEnter={() => setHovered(s.index)}
-                  onClick={() => onPin(selected ? null : s.index)}
-                  className={`group flex w-full gap-2.5 border-l-2 px-3.5 py-1.5 text-left transition ${
-                    selected
-                      ? 'border-accent bg-accent/10'
-                      : s.status === 'failed'
-                        ? 'border-critical/70 hover:bg-raised'
-                        : s.kind === 'finding'
-                          ? 'border-medium/70 bg-medium/5 hover:bg-medium/10'
-                          : current
-                            ? 'border-line-strong bg-raised'
-                            : 'border-transparent hover:bg-raised'
-                  }`}
-                >
-                  <span className="w-5 flex-none pt-px text-right font-mono text-[10.5px] text-faint">
-                    {s.index}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-baseline gap-2">
-                      {KIND_LABEL[s.kind] ? (
-                        <span
-                          className={`flex-none font-mono text-[10.5px] font-semibold tracking-wide uppercase ${KIND_STYLE[s.kind]}`}
-                        >
-                          {KIND_LABEL[s.kind]}
-                        </span>
-                      ) : null}
-                      <span
-                        className={`min-w-0 truncate ${
-                          stage ? 'text-[12px] text-faint italic' : 'text-[12.5px] text-ink'
-                        }`}
-                        title={s.label}
-                      >
-                        {s.label}
-                      </span>
-                    </span>
-                    {s.why ? (
-                      <span className="mt-0.5 block text-[11.5px] leading-snug text-muted">
-                        {s.why}
-                      </span>
-                    ) : null}
-                    {s.status === 'failed' ? (
-                      <span className="mt-0.5 block text-[11px] text-critical">
-                        Action did not complete
-                      </span>
-                    ) : null}
-                  </span>
-                  <span
-                    className="flex-none self-start pt-px font-mono text-[10.5px] text-faint tabular-nums"
-                    title="Time since the test started"
-                  >
-                    {Number.isFinite(firstAt) ? formatDuration(Date.parse(s.at) - firstAt) : ''}
-                  </span>
-                  {s.signals ? (
-                    <span
-                      className="flex-none self-start rounded-full border border-critical/40 px-1.5 font-mono text-[10px] text-critical"
-                      title="New errors, failed requests or dialogs after this step"
-                    >
-                      {s.signals}
-                    </span>
-                  ) : null}
-                </button>
-              </li>
-            );
-          })}
-          {live && steps.length === 0 ? (
-            <li className="px-4 py-3 text-[12.5px] text-faint">Starting the browser…</li>
-          ) : null}
-        </ol>
+          <StepTimeline
+            steps={steps}
+            live={live}
+            pinned={pinned}
+            following={following}
+            now={now}
+            onPin={onPin}
+            onHover={setHovered}
+          />
+        </div>
       </section>
 
       {/* Browser viewport */}

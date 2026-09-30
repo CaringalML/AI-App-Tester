@@ -165,3 +165,16 @@ async def test_progress_only_moves_forward_and_is_persisted() -> None:
     stored = await store.get(scan.id)
     assert stored.stage == "done"
     assert stored.completion == 1.0
+
+
+async def test_steps_are_tagged_with_the_phase_they_happened_in() -> None:
+    scan, store = _scan(), MemoryScanStore()
+    reporter = Reporter(scan, store, _Artifacts())
+    await reporter.advance("loading", 0.05)
+    await reporter.progress("Opening the page")
+    await reporter.advance("exploring", 0.3)
+    await reporter.step("click", "Login")
+    await reporter.advance("reviewing", 0.9)
+    await reporter.progress("Double-checking")
+    phases = [s.phase for s in (await store.get(scan.id)).timeline]
+    assert phases == ["prepare", "explore", "review"]
