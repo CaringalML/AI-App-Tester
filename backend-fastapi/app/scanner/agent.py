@@ -149,7 +149,8 @@ TOOLS: list[dict[str, Any]] = [
                 "location": {"type": "string", "description": "Path where it happens."},
                 "selector": {
                     "type": "string",
-                    "description": "Element involved, as a ref or description. Empty if none.",
+                    "description": "The element involved, as a developer would find it: its "
+                    "visible label or a CSS selector, never a ref. Empty if none.",
                 },
                 "evidence": {"type": "string", "description": "What you observed."},
                 "steps": {"type": "array", "items": {"type": "string"}},
@@ -190,13 +191,13 @@ def format_page_state(state: dict[str, Any]) -> str:
     lines = [f"URL: {state.get('url')}", f"Title: {state.get('title') or '(none)'}"]
     if state.get("alerts"):
         lines.append("Alerts / invalid fields: " + " | ".join(state["alerts"]))
-    lines.append("Interactive elements:")
+    lines.append("Interactive elements (quoted: the name a screen reader announces):")
     for el in state.get("elements", []):
         desc = f"  {el['ref']} {el['tag']}"
         if el.get("type"):
             desc += f"[{el['type']}]"
         desc += f' "{el.get("label", "")}"'
-        for key in ("href", "value"):
+        for key in ("field", "href", "value"):
             if el.get(key):
                 desc += f" {key}={el[key]}"
         if el.get("options"):

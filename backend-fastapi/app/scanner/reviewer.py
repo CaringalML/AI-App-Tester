@@ -91,6 +91,30 @@ def _describe(finding: Finding, observations: ObservationLog) -> str:
     return "\n".join(lines)
 
 
+_AXE_NOTE = (
+    "Automated accessibility checks (axe-core, WCAG 2.1 A and AA) ran on every page above, "
+    'and everything they found is listed as a finding with source "automated". An agent '
+    "finding that claims a problem those checks test for (a button or link without an "
+    "accessible name, an image without alt text, a form field without a label, low colour "
+    "contrast) that they did not report contradicts a real measurement of the page: drop it "
+    "unless its cited evidence proves it."
+)
+
+
+def review_request(
+    findings: list[Finding],
+    observations: ObservationLog,
+    target_url: str,
+    visited: list[str],
+    accessibility_checked: bool,
+) -> str:
+    """The reviewer's input: the run's context, then every finding beside its evidence."""
+    head = f"Site tested: {target_url}\nPages visited: {', '.join(visited[:10])}\n"
+    if accessibility_checked:
+        head += f"\n{_AXE_NOTE}\n"
+    return head + "\n" + "\n\n".join(_describe(f, observations) for f in findings)
+
+
 async def review_findings(
     *,
     client: anthropic.AsyncAnthropic,
@@ -100,13 +124,12 @@ async def review_findings(
     usage: UsageTracker,
     target_url: str,
     visited: list[str],
+    accessibility_checked: bool = False,
 ) -> tuple[list[Finding], list[SuppressedFinding], str | None]:
     if not findings:
         return [], [], None
 
-    body = f"Site tested: {target_url}\nPages visited: {', '.join(visited[:10])}\n\n" + "\n\n".join(
-        _describe(f, observations) for f in findings
-    )
+    body = review_request(findings, observations, target_url, visited, accessibility_checked)
     response = await client.messages.create(
         model=settings.anthropic_model,
         max_tokens=16_000,

@@ -32,6 +32,14 @@ it works but could clearly be better.
 - The automated checks listed in the first message are already in the report. Do not \
 re-report them. Do investigate them if an action you take can explain their cause.
 - Prefer a few well-evidenced findings over many speculative ones.
+- Do not report missing accessible names, missing alt text, unlabelled form fields or low \
+colour contrast yourself. The automated accessibility checks test those against the real \
+page and are already in the report; the element list is a summary and can miss what they \
+see. Report the accessibility problems they cannot catch, such as a keyboard trap, focus \
+lost after an action, or an error that is never announced.
+- Write the title, evidence, steps and suggestion for a developer who never saw this \
+session. Describe elements by their visible label or place on the page, never by ref \
+(e12), and keep act-N / obs-N ids in evidence_ids rather than in the text.
 - Give each finding an expectation: the one observable fact that will be true once it is \
 fixed, such as the validation text that should appear or the URL it should reach. It \
 becomes the assertion of a Playwright regression test, so it must be false on the page \

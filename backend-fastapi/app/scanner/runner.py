@@ -264,6 +264,8 @@ class ScanRunner:
             accessibility=options.check_accessibility,
             axe_path=settings.axe_path,
         )
+        # Whether axe-core really ran, so the reviewer can weigh accessibility claims against it.
+        accessibility_checked = options.check_accessibility and session.accessibility_available
         async with session:
             if options.check_accessibility and not session.accessibility_available:
                 scan.notes.append("Accessibility checks were unavailable for this scan.")
@@ -367,6 +369,7 @@ class ScanRunner:
                     usage=usage,
                     target_url=target,
                     visited=scan.visited_urls,
+                    accessibility_checked=accessibility_checked,
                 )
             except anthropic.APIError as exc:
                 scan.notes.append(f"The review step did not run ({_api_reason(exc)}).")

@@ -5,7 +5,7 @@ from app.models import Finding
 from app.scanner.agent import ExplorationAgent
 from app.scanner.findings import FindingCollector
 from app.scanner.observations import ObservationLog
-from app.scanner.reviewer import Decision, Review, apply_review
+from app.scanner.reviewer import Decision, Review, apply_review, review_request
 from app.scanner.usage import UsageTracker
 
 
@@ -72,6 +72,16 @@ def test_reviewer_cannot_promote_an_ungrounded_claim() -> None:
         [ungrounded], Review(summary="s", decisions=[_decide("f-1", "keep", confidence="high")])
     )
     assert kept[0].confidence == "low"
+
+
+def test_reviewer_is_told_what_the_accessibility_checks_already_measured() -> None:
+    findings = [_finding("f-1")]
+    with_axe = review_request(findings, ObservationLog(), "https://a.example/", ["/"], True)
+    without = review_request(findings, ObservationLog(), "https://a.example/", ["/"], False)
+    # When axe-core ran, a claim it would have caught but did not is a contradiction.
+    assert "axe-core" in with_axe and "drop it" in with_axe
+    assert "axe-core" not in without
+    assert "## f-1" in with_axe and "## f-1" in without
 
 
 def test_reviewer_ignores_invented_ids() -> None:

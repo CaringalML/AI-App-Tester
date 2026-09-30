@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { bugText, stepsText } from '../lib/copyText';
+import { bugText, readableEvidence, recordedEvidence, stepsText } from '../lib/copyText';
 import type { Finding, Severity } from '../lib/types';
 import { CopyButton } from './CopyButton';
 import { LinkedText } from './LinkedText';
@@ -187,9 +187,30 @@ export function FindingCard({
             <SectionHeading copy={() => bugText(finding, targetUrl)} label="what happened">
               What happened
             </SectionHeading>
-            <pre className="font-mono text-[12.5px] leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap text-muted">
-              {finding.evidence}
-            </pre>
+            {finding.source === 'agent' ? (
+              <>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap text-muted">
+                  {readableEvidence(finding.evidence)}
+                </p>
+                {recordedEvidence(finding.evidence).length ? (
+                  <div className="mt-2.5 rounded-lg border border-line bg-bg px-3 py-2">
+                    <p className="mb-1 text-[11px] font-semibold tracking-[0.06em] text-faint uppercase">
+                      What the browser recorded
+                    </p>
+                    <ul className="grid gap-1 font-mono text-[12px] leading-relaxed text-muted">
+                      {recordedEvidence(finding.evidence).map((line, index) => (
+                        <li key={index}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              // Browser checks report raw data (HTML snippets, URLs), which reads best as-is.
+              <pre className="font-mono text-[12.5px] leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap text-muted">
+                {finding.evidence}
+              </pre>
+            )}
           </section>
 
           <RegressionTest finding={finding} />

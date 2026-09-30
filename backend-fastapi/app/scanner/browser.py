@@ -44,6 +44,39 @@ _SNAPSHOT_JS = """
     '[role=button]', '[role=link]', '[role=tab]', '[role=checkbox]', '[role=menuitem]',
     '[role=switch]', '[contenteditable=true]'
   ].join(',');
+  const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+  // The name a screen reader announces, in the order browsers work it out:
+  // aria-labelledby, aria-label, a <label>, a submit button's value, then the
+  // element's own content, which includes the alt text of images inside it
+  // (an image-only button is named by its image), then title and placeholder.
+  // Reading innerText alone made every image button look nameless.
+  const nameOf = (el, tag) => {
+    const byIds = (el.getAttribute('aria-labelledby') || '').split(/\\s+/)
+      .map((id) => id && document.getElementById(id)).filter(Boolean)
+      .map((n) => clean(n.innerText || n.textContent)).join(' ');
+    if (byIds) return byIds;
+    const aria = clean(el.getAttribute('aria-label'));
+    if (aria) return aria;
+    if (el.labels && el.labels.length) {
+      const labels = clean([...el.labels].map((l) => l.innerText).join(' '));
+      if (labels) return labels;
+    }
+    if (tag === 'input' && ['submit', 'button', 'reset'].includes(el.type) && clean(el.value)) {
+      return clean(el.value);
+    }
+    if (tag === 'input' && el.type === 'image' && clean(el.getAttribute('alt'))) {
+      return clean(el.getAttribute('alt'));
+    }
+    if (!['input', 'select', 'textarea'].includes(tag)) {
+      const own = clean(el.innerText);
+      if (own) return own;
+      const inner = [...el.querySelectorAll('img[alt], [role=img][aria-label], svg[aria-label], svg title')]
+        .map((n) => clean(n.getAttribute('alt') || n.getAttribute('aria-label') || n.textContent))
+        .filter(Boolean).join(' ');
+      if (inner) return inner;
+    }
+    return clean(el.getAttribute('title') || el.getAttribute('placeholder'));
+  };
   let next = window.__aatRef || 0;
   const elements = [];
   for (const el of document.querySelectorAll(selector)) {
@@ -53,13 +86,13 @@ _SNAPSHOT_JS = """
     let ref = el.getAttribute('data-aat-ref');
     if (!ref) { ref = 'e' + (++next); el.setAttribute('data-aat-ref', ref); }
     const tag = el.tagName.toLowerCase();
-    const labelled = el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
-    const label = (el.getAttribute('aria-label') || (labelled && labelled.innerText) || el.innerText ||
-      el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') ||
-      el.getAttribute('name') || '').trim().replace(/\\s+/g, ' ').slice(0, 80);
-    const item = { ref, tag, label };
+    const item = { ref, tag, label: nameOf(el, tag).slice(0, 80) };
     const type = el.getAttribute('type') || el.getAttribute('role');
     if (type) item.type = type;
+    // A form field's name attribute identifies it without being mistaken for a label.
+    if (['input', 'select', 'textarea'].includes(tag) && el.getAttribute('name')) {
+      item.field = el.getAttribute('name').slice(0, 40);
+    }
     if (tag === 'a') item.href = el.getAttribute('href');
     if (el.disabled) item.disabled = true;
     if (el.required) item.required = true;

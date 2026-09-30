@@ -18,12 +18,33 @@ export function pageUrl(location: string, targetUrl?: string): string {
   }
 }
 
+const RECORDED = /\n\s*Recorded evidence:\n?/;
+/** A bracketed list of the scanner's ids, like "(act-1)" or "(e15, e17, …, e61)". */
+const ID_LIST = /\s*\((?:\s*(?:e\d+|(?:act|obs)-\d+|…|\.{3})\s*,?)+\s*\)/g;
+
 /** The evidence prose without the scanner's reference ids or its recorded log. */
 export function readableEvidence(evidence: string): string {
-  return evidence
-    .split(/\n\s*Recorded evidence:/)[0]
-    .replace(/\s*\((?:act|obs)-\d+(?:\s*,\s*(?:act|obs)-\d+)*\)/g, '')
-    .trim();
+  return evidence.split(RECORDED)[0].replace(ID_LIST, '').trim();
+}
+
+/**
+ * The browser log lines a finding cites, for display: "clicked "Login" · URL
+ * unchanged" rather than "act-3 [action] clicked e15 "Login" | URL unchanged".
+ */
+export function recordedEvidence(evidence: string): string[] {
+  const log = evidence.split(RECORDED)[1];
+  if (!log) return [];
+  return log
+    .split('\n')
+    .map((line) =>
+      line
+        .replace(/^\s*-\s*/, '')
+        .replace(/\b(?:act|obs)-\d+ \[[a-z-]+\]\s*/g, '')
+        .replace(/\be\d+ (?=")/g, '')
+        .replace(/ \| /g, ' · ')
+        .trim(),
+    )
+    .filter(Boolean);
 }
 
 export function bugText(finding: Finding, targetUrl?: string): string {
