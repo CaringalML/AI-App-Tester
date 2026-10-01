@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { bugText, readableEvidence, recordedEvidence, stepsText } from '../lib/copyText';
 import type { Finding, Severity } from '../lib/types';
 import { CopyButton } from './CopyButton';
+import { InspectSection } from './InspectSection';
 import { LinkedText } from './LinkedText';
 import { RegressionTest } from './RegressionTest';
 
@@ -299,6 +300,8 @@ export function FindingCard({
               </pre>
             )}
           </section>
+
+          {finding.inspect?.length ? <InspectSection targets={finding.inspect} /> : null}
 
           <RegressionTest finding={finding} />
 

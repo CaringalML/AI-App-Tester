@@ -157,6 +157,30 @@ def test_a_rare_pair_on_a_named_element_still_gets_a_fix() -> None:
     assert contrast_ratio("#ffffff", "#857262") >= 4.5
 
 
+def test_each_example_element_can_be_found_in_devtools() -> None:
+    style = {
+        "name": "background-color",
+        "value": "#887564",
+        "rule": ".btn",
+        "source": "app.css:12",
+        "url": "https://spa.example/app.css",
+        "element": "a.btn",
+    }
+    nodes = [
+        {**_CONTRAST["nodes"][0], "styles": [style]},
+        {"target": "iframe #x", "html": "<p>in a frame</p>", "nested": True},
+    ]
+    log = ObservationLog()
+    log.add("a11y", PAGE, "contrast", **{**_CONTRAST, "nodes": nodes})
+    collector = FindingCollector()
+    build_automated_findings(log, collector, ScanOptions())
+    [target] = collector.items[0].inspect  # the framed element has no single selector
+    assert (target.selector, target.text) == (".btn", "Book now")
+    assert target.html == '<a class="btn">Book now</a>'
+    assert target.styles[0].rule == ".btn" and target.styles[0].element == "a.btn"
+    assert target.styles[0].url == "https://spa.example/app.css"
+
+
 def test_contrast_ratio_matches_the_wcag_formula() -> None:
     assert round(contrast_ratio("#000000", "#ffffff"), 1) == 21.0
     assert round(contrast_ratio("#777777", "#777777"), 1) == 1.0

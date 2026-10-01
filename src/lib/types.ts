@@ -54,6 +54,33 @@ export interface Finding {
   playwrightTest?: string | null;
   testStatus?: 'fails-now' | 'passes-now' | 'unverified' | null;
   testNote?: string | null;
+  /** The elements involved, ready to find in DevTools (accessibility findings). */
+  inspect?: InspectTarget[];
+}
+
+/** Where one of an element's colours is set, as DevTools' Styles pane shows it. */
+export interface StyleSource {
+  /** "color" or "background-color". */
+  name: string;
+  /** As written in the CSS, e.g. "#a48d78" or "var(--gold)". */
+  value: string;
+  /** The rule's selector, e.g. ".text-gold". */
+  rule: string;
+  /** "app.css:2429", "<style> in the page, line 40" or "inline style". */
+  source: string;
+  url?: string | null;
+  /** Set on an ancestor and inherited, as color is. */
+  inherited?: boolean;
+  /** The ancestor that paints a background, e.g. "section.bg-sand". */
+  element?: string | null;
+}
+
+/** An element to find with right-click > Inspect, or by pasting its selector into DevTools. */
+export interface InspectTarget {
+  selector: string;
+  html: string;
+  text?: string | null;
+  styles: StyleSource[];
 }
 
 export interface SuppressedFinding {

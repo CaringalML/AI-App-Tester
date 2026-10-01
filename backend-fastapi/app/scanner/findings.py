@@ -348,6 +348,16 @@ def _accessibility(log: ObservationLog, collector: FindingCollector) -> None:
             steps=[f"Open {first.page}", "Run an accessibility checker such as axe DevTools"],
             suggestion=suggestion,
             evidence_ids=_ids(group),
+            inspect=[
+                {
+                    "selector": n["target"],
+                    "html": n["html"],
+                    "text": n.get("text") or None,
+                    "styles": n.get("styles") or [],
+                }
+                for n in nodes[:3]
+                if not n.get("nested")
+            ],
         )
 
 

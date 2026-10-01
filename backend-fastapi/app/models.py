@@ -57,6 +57,27 @@ class ScanRequest(ApiModel):
     options: ScanOptions = Field(default_factory=ScanOptions)
 
 
+class StyleSource(ApiModel):
+    """Where one of an element's colours is set, as DevTools' Styles pane shows it."""
+
+    name: str  # "color" or "background-color"
+    value: str  # as written in the CSS, e.g. "#a48d78" or "var(--gold)"
+    rule: str  # the rule's selector, e.g. ".text-gold"
+    source: str  # "index-8f2a.css:1", "<style> in the page, line 40" or "inline style"
+    url: str | None = None
+    inherited: bool = False  # set on an ancestor and inherited, as color is
+    element: str | None = None  # the ancestor that paints a background, e.g. "section.bg-sand"
+
+
+class InspectTarget(ApiModel):
+    """One element to find with right-click > Inspect, or by pasting `selector` in DevTools."""
+
+    selector: str
+    html: str
+    text: str | None = None
+    styles: list[StyleSource] = Field(default_factory=list)
+
+
 class Finding(ApiModel):
     id: str
     title: str
@@ -82,6 +103,8 @@ class Finding(ApiModel):
     test_status: Literal["fails-now", "passes-now", "unverified"] | None = None
     test_note: str | None = None
     test_body: list[str] = Field(default_factory=list)
+    # The elements involved, ready to find in DevTools (accessibility findings).
+    inspect: list[InspectTarget] = Field(default_factory=list)
 
 
 class SuppressedFinding(ApiModel):

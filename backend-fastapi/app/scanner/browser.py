@@ -135,10 +135,45 @@ _PAGE_FACTS_JS = """
 _AXE_JS = """
 async () => {
   if (!window.axe) return null;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // Text measured halfway through a fade-in looks fainter than anyone will ever see
+  // it, so let entrance animations finish first. Endless ones (spinners, marquees)
+  // never finish, so they are left out, and the wait is capped either way.
+  const finishing = document.getAnimations().filter((a) => {
+    const timing = a.effect && a.effect.getComputedTiming();
+    return a.playState === 'running' && timing && timing.iterations !== Infinity;
+  });
+  await Promise.race([Promise.all(finishing.map((a) => a.finished.catch(() => null))), sleep(3000)]);
+
   const result = await window.axe.run(document, {
     resultTypes: ['violations'],
     runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },
   });
+  // The colours and ratio axe measured, for contrast failures.
+  const contrastOf = (n) => {
+    const d = (n.any[0] || {}).data || {};
+    return d.fgColor ? { fg: d.fgColor, bg: d.bgColor, ratio: d.contrastRatio, need: d.expectedContrastRatio } : null;
+  };
+  // Contrast is measured twice, a second apart, and only failures that come out the
+  // same both times are kept. One that changed in between belonged to something
+  // moving (an animation, a carousel, a transition), not to the page as people see it.
+  const contrast = result.violations.find((v) => v.id === 'color-contrast');
+  if (contrast) {
+    await sleep(1000);
+    const again = await window.axe.run(
+      { include: contrast.nodes.map((n) => n.target) },
+      { resultTypes: ['violations'], runOnly: { type: 'rule', values: ['color-contrast'] } },
+    );
+    const repeat = new Map(
+      ((again.violations[0] || {}).nodes || []).map((n) => [n.target.join(' '), contrastOf(n)]),
+    );
+    contrast.nodes = contrast.nodes.filter((n) => {
+      const first = contrastOf(n);
+      const second = repeat.get(n.target.join(' '));
+      return first && second && first.fg === second.fg && first.bg === second.bg;
+    });
+    if (!contrast.nodes.length) result.violations = result.violations.filter((v) => v !== contrast);
+  }
   // What a person would call the element: its visible text or name, not its selector.
   const textOf = (n) => {
     try {
@@ -148,11 +183,6 @@ async () => {
     } catch (e) {
       return '';
     }
-  };
-  // The colours and ratio axe measured, for contrast failures.
-  const contrastOf = (n) => {
-    const d = (n.any[0] || {}).data || {};
-    return d.fgColor ? { fg: d.fgColor, bg: d.bgColor, ratio: d.contrastRatio, need: d.expectedContrastRatio } : null;
   };
   return result.violations.map(v => {
     const pairs = {};
@@ -168,6 +198,8 @@ async () => {
       count: v.nodes.length,
       nodes: v.nodes.slice(0, 4).map(n => ({
         target: n.target.join(' '), html: n.html.slice(0, 180), text: textOf(n), contrast: contrastOf(n),
+        // Inside an iframe or shadow root: a single selector cannot reach it.
+        nested: n.target.length > 1,
       })),
       // The most common colour pairs across every failing element, with how many use each.
       pairs: Object.values(pairs).sort((a, b) => b.count - a.count).slice(0, 5),
@@ -175,6 +207,47 @@ async () => {
   });
 }
 """
+
+
+# Marks the element that paints the background behind `selector`: itself or the
+# nearest ancestor with a visible background colour. Returns how DevTools would
+# label it (tag, id, first classes), or null when the page's own canvas shows through.
+_MARK_BACKGROUND_JS = """
+(selector) => {
+  document.querySelectorAll('[data-aat-bg]').forEach((n) => n.removeAttribute('data-aat-bg'));
+  let n = document.querySelector(selector);
+  while (n) {
+    const bg = getComputedStyle(n).backgroundColor;
+    if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
+      n.setAttribute('data-aat-bg', '1');
+      const id = n.id ? '#' + n.id : '';
+      return n.tagName.toLowerCase() + id + [...n.classList].slice(0, 2).map((c) => '.' + c).join('');
+    }
+    n = n.parentElement;
+  }
+  return null;
+}
+"""
+
+
+def _declared(style: dict, names: tuple[str, ...]) -> str | None:
+    """The value a style block sets for any of `names`; the last declaration wins.
+
+    The protocol lists each declaration twice: as written (it has `text`) and as
+    the engine parsed it (#cbb9a4 becomes rgb(203, 185, 164)). DevTools shows what
+    the author wrote, and so does this; the parsed form is only a fallback.
+    """
+    found = [
+        prop
+        for prop in style.get("cssProperties") or []
+        if prop.get("name") in names
+        and prop.get("value")
+        and not prop.get("disabled")
+        and prop.get("parsedOk") is not False
+    ]
+    written = [prop for prop in found if prop.get("text")]
+    chosen = written or found
+    return chosen[-1]["value"].strip() if chosen else None
 
 
 @dataclass
@@ -264,6 +337,10 @@ class BrowserSession:
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self.page: Page | None = None
+        # A DevTools protocol session, opened on first use, and where each stylesheet
+        # came from, so a finding can say which CSS rule sets a colour.
+        self._devtools_session = None
+        self._stylesheets: dict[str, dict] = {}
 
     @property
     def accessibility_available(self) -> bool:
@@ -484,6 +561,11 @@ class BrowserSession:
                 log.warning("axe failed on %s: %s", url, exc)
                 violations = None
             for violation in violations or []:
+                if violation.get("id") == "color-contrast":
+                    # Which CSS rules set the colours, for the finding's Inspect section.
+                    for node in violation.get("nodes", [])[:3]:
+                        if not node.get("nested"):
+                            node["styles"] = await self.style_sources(node["target"])
                 self.log.add(
                     "a11y",
                     url,
@@ -491,6 +573,121 @@ class BrowserSession:
                     **violation,
                 )
         return True
+
+    # ---- where styles come from, as DevTools shows it -------------------------
+
+    async def _devtools(self):  # noqa: ANN202 - playwright CDPSession
+        """A DevTools protocol session on the page that records where stylesheets came from."""
+        assert self._context is not None and self.page is not None
+        if self._devtools_session is None:
+            session = await self._context.new_cdp_session(self.page)
+            session.on(
+                "CSS.styleSheetAdded",
+                lambda event: self._stylesheets.__setitem__(
+                    event["header"]["styleSheetId"], event["header"]
+                ),
+            )
+            await session.send("DOM.enable")
+            await session.send("CSS.enable")
+            self._devtools_session = session
+        return self._devtools_session
+
+    async def style_sources(self, selector: str) -> list[dict]:
+        """The CSS rules that set an element's text colour and its background.
+
+        What a developer finds by right-clicking the element, choosing Inspect and
+        reading the Styles pane: the declaration, the rule's selector, and the file
+        and line it comes from. Best effort: a failure returns whatever was found.
+        """
+        assert self.page is not None
+        sources: list[dict] = []
+        try:
+            devtools = await self._devtools()
+            colour = await self._declaring_rule(devtools, selector, ("color",), inherited=True)
+            if colour:
+                sources.append({"name": "color", **colour})
+            painter = await self.page.evaluate(_MARK_BACKGROUND_JS, selector)
+            if painter:
+                background = await self._declaring_rule(
+                    devtools,
+                    '[data-aat-bg="1"]',
+                    ("background-color", "background"),
+                    inherited=False,
+                )
+                if background:
+                    sources.append({"name": "background-color", **background, "element": painter})
+        except Exception as exc:  # DevTools detail is a bonus; it must never fail an audit
+            log.debug("style sources for %s failed: %s", selector, exc)
+        finally:
+            try:
+                await self.page.evaluate(
+                    "() => document.querySelectorAll('[data-aat-bg]')"
+                    ".forEach((n) => n.removeAttribute('data-aat-bg'))"
+                )
+            except PlaywrightError:
+                pass
+        return sources
+
+    async def _declaring_rule(
+        self,
+        devtools,
+        selector: str,
+        names: tuple[str, ...],
+        *,
+        inherited: bool,  # noqa: ANN001
+    ) -> dict | None:
+        """The style that wins for `names` on the element, as the Styles pane lists it."""
+        document = await devtools.send("DOM.getDocument", {"depth": 0})
+        found = await devtools.send(
+            "DOM.querySelector", {"nodeId": document["root"]["nodeId"], "selector": selector}
+        )
+        if not found.get("nodeId"):
+            return None
+        matched = await devtools.send("CSS.getMatchedStylesForNode", {"nodeId": found["nodeId"]})
+        # The element's own styles first, then (for inherited properties such as color)
+        # each ancestor's, nearest first.
+        layers = [(False, matched.get("inlineStyle"), matched.get("matchedCSSRules") or [])]
+        if inherited:
+            layers += [
+                (True, entry.get("inlineStyle"), entry.get("matchedCSSRules") or [])
+                for entry in matched.get("inherited") or []
+            ]
+        for was_inherited, inline, rules in layers:
+            if inline and (value := _declared(inline, names)):
+                return {
+                    "value": value,
+                    "rule": "style attribute",
+                    "source": "inline style",
+                    "inherited": was_inherited,
+                }
+            # Rules arrive lowest precedence first; the last one that declares the
+            # property is the one that applies, which DevTools shows at the top.
+            for match in reversed(rules):
+                rule = match.get("rule") or {}
+                if rule.get("origin") != "regular":
+                    continue  # the browser's own defaults
+                if value := _declared(rule.get("style") or {}, names):
+                    return {
+                        "value": value,
+                        "rule": rule["selectorList"]["text"][:120],
+                        **self._rule_source(rule),
+                        "inherited": was_inherited,
+                    }
+        return None
+
+    def _rule_source(self, rule: dict) -> dict:
+        """'index-8f2a.css:1' with its URL, or '<style> in the page, line 40'."""
+        assert self.page is not None
+        header = self._stylesheets.get(rule.get("styleSheetId") or "", {})
+        url = header.get("sourceURL") or ""
+        start = (rule.get("style") or {}).get("range")
+        line = header.get("startLine", 0) + start["startLine"] + 1 if start else None
+        if header.get("isInline") or not url or url == self.page.url:
+            where = "<style> in the page" + (f", line {line}" if line else "")
+            return {"source": where, "url": None}
+        name = urlsplit(url).path.rsplit("/", 1)[-1] or url
+        link = url if url.startswith(("http://", "https://")) else None
+        return {"source": f"{name}:{line}" if line else name, "url": link}
 
     async def check_links(self, limit: int) -> None:
         """Request same-site links that were not visited, to find ones that are broken."""
