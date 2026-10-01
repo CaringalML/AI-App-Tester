@@ -182,19 +182,25 @@ class ScanRunner:
         self.artifacts = artifacts
         self.client = client
         self._active = 0
+        self._thorough = 0
         self._tasks: set[asyncio.Task] = set()
 
-    def has_capacity(self) -> bool:
-        return self._active < self.settings.max_concurrent_scans
+    def has_capacity(self, depth: str = "quick") -> bool:
+        if self._active >= self.settings.max_concurrent_scans:
+            return False
+        return depth != "thorough" or self._thorough < self.settings.max_thorough_scans
 
     def start(self, scan: Scan) -> None:
+        thorough = scan.options.depth == "thorough"
         self._active += 1
+        self._thorough += thorough
         task = asyncio.create_task(self._run(scan), name=f"scan-{scan.id}")
         self._tasks.add(task)
-        task.add_done_callback(self._finished)
+        task.add_done_callback(lambda done: self._finished(done, thorough))
 
-    def _finished(self, task: asyncio.Task) -> None:
+    def _finished(self, task: asyncio.Task, thorough: bool) -> None:
         self._active -= 1
+        self._thorough -= thorough
         self._tasks.discard(task)
 
     async def shutdown(self) -> None:
@@ -211,10 +217,11 @@ class ScanRunner:
         scan.started_at = utcnow()
         scan.expires_at = int((utcnow() + timedelta(days=settings.scan_ttl_days)).timestamp())
 
+        _, seconds = settings.budget(scan.options.depth)
         try:
             await asyncio.wait_for(
                 self._execute(scan, reporter, collector, usage),
-                timeout=settings.scan_timeout_seconds + 60,
+                timeout=seconds + 60,
             )
             scan.status = "done"
             scan.stage, scan.completion = "done", 1.0
@@ -249,11 +256,12 @@ class ScanRunner:
         usage: UsageTracker,
     ) -> None:
         settings, options = self.settings, scan.options
-        deadline = time.monotonic() + settings.scan_timeout_seconds
+        steps, seconds = settings.budget(options.depth)
+        deadline = time.monotonic() + seconds
         guard = TargetGuard(settings.allow_private_targets)
         observations = ObservationLog()
 
-        scan.agent_budget = settings.max_agent_steps
+        scan.agent_budget = steps
         await reporter.advance("checking", 0.02)
         await reporter.progress("Checking the address is safe to test")
         target = await guard.check_url(scan.target_url)
@@ -335,6 +343,7 @@ class ScanRunner:
                 recorder=reporter,
                 scan_id=scan.id,
                 deadline=deadline,
+                budget=steps,
             )
             try:
                 await session.open(start_url)

@@ -21,7 +21,8 @@ const API_URL = import.meta.env.VITE_API_URL?.replace(/\/+$/, '');
 export const isLiveApi = Boolean(API_URL);
 
 const POLL_MS = 1500;
-const GIVE_UP_MS = 8 * 60 * 1000;
+// Past the longest scan (a thorough one may run 30 minutes) with room to spare.
+const GIVE_UP_MS = 40 * 60 * 1000;
 /** Consecutive 5xx polls (about 12 seconds' worth) before a scan is reported as lost. */
 const MAX_SERVER_ERRORS = 8;
 

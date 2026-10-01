@@ -16,7 +16,7 @@ class FakeRunner:
     def __init__(self) -> None:
         self.started = []
 
-    def has_capacity(self) -> bool:
+    def has_capacity(self, depth: str = "quick") -> bool:
         return True
 
     def start(self, scan) -> None:  # noqa: ANN001

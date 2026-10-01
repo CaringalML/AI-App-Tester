@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ScanOptions } from '../lib/types';
+import type { ScanDepth, ScanOptions } from '../lib/types';
 import { formatDuration, useElapsed } from '../lib/time';
 import { checkUrl } from '../lib/url';
 
@@ -12,7 +12,18 @@ interface Props {
   busySince?: number | null;
 }
 
-const TOGGLES: Array<{ key: keyof ScanOptions; label: string; hint: string }> = [
+type Toggle = 'findBugs' | 'findImprovements' | 'checkAccessibility';
+
+const DEPTHS: Array<{ value: ScanDepth; label: string; hint: string }> = [
+  { value: 'quick', label: 'Quick', hint: 'About 2 minutes, up to 30 actions by Claude.' },
+  {
+    value: 'thorough',
+    label: 'Thorough',
+    hint: 'Up to 30 minutes and 100 actions, for deeper coverage. Costs more; small sites finish sooner.',
+  },
+];
+
+const TOGGLES: Array<{ key: Toggle; label: string; hint: string }> = [
   { key: 'findBugs', label: 'Broken things', hint: 'Errors, dead ends and flows that fail' },
   {
     key: 'findImprovements',
@@ -43,9 +54,11 @@ export function ScanForm({ options, onOptionsChange, onSubmit, busy, busySince }
     onSubmit(check.normalized);
   }
 
-  function toggle(key: keyof ScanOptions) {
+  function toggle(key: Toggle) {
     onOptionsChange({ ...options, [key]: !options[key] });
   }
+
+  const depth = DEPTHS.find((d) => d.value === options.depth) ?? DEPTHS[0];
 
   return (
     <form className="mb-7" onSubmit={handleSubmit} noValidate>
@@ -154,6 +167,34 @@ export function ScanForm({ options, onOptionsChange, onSubmit, busy, busySince }
             </button>
           );
         })}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <div
+          className="inline-flex rounded-full border border-line bg-surface p-0.5"
+          role="radiogroup"
+          aria-label="How deep to test"
+        >
+          {DEPTHS.map(({ value, label }) => {
+            const on = options.depth === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                disabled={busy}
+                onClick={() => onOptionsChange({ ...options, depth: value })}
+                className={`rounded-full px-3.25 py-1.25 text-[13px] transition disabled:opacity-50 ${
+                  on ? 'bg-accent/12 text-ink ring-1 ring-accent/30' : 'text-muted hover:text-ink'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <span className="text-[12.5px] text-faint">{depth.hint}</span>
       </div>
     </form>
   );

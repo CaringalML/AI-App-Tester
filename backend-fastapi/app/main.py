@@ -130,12 +130,13 @@ def create_app(
         except TargetNotAllowedError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-        if not runner.has_capacity():
-            raise HTTPException(
-                status_code=429,
-                detail="The tester is busy with other scans. Try again in a minute.",
-                headers={"Retry-After": "60"},
+        if not runner.has_capacity(body.options.depth):
+            busy = (
+                "A thorough scan is already running. Run a quick scan, or try again later."
+                if body.options.depth == "thorough" and runner.has_capacity()
+                else "The tester is busy with other scans. Try again in a minute."
             )
+            raise HTTPException(status_code=429, detail=busy, headers={"Retry-After": "60"})
         wait = limiter.check(_client_id(request))
         if wait is not None:
             minutes = max(1, round(wait / 60))
@@ -157,10 +158,13 @@ def create_app(
         runner.start(scan)
         return ScanAccepted(id=scan.id, status=scan.status, owner_token=owner_token)
 
+    # A running scan saves after every step, and its longest quiet stretch (checking
+    # links, one long Claude turn) is a few minutes, so this gap holds for quick and
+    # thorough scans alike.
     stale_after = timedelta(seconds=settings.scan_timeout_seconds + 180)
 
     def settle_status(scan: Scan) -> Scan:
-        # A scan left "running" long past its limit belonged to a task that died.
+        # A scan that has stopped saving for that long belonged to a task that died.
         if scan.status in ("queued", "running") and utcnow() - scan.updated_at > stale_after:
             scan.status, scan.error = "error", "The scan was interrupted before it finished."
         return scan

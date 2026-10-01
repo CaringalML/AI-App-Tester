@@ -168,7 +168,11 @@ export interface ScanOptions {
   checkAccessibility: boolean;
   /** Upper bound on pages explored, so a scan cannot run away during a demo. */
   maxPages: number;
+  /** quick: about 2 minutes, up to 30 actions. thorough: up to 30 minutes and 100 actions. */
+  depth: ScanDepth;
 }
+
+export type ScanDepth = 'quick' | 'thorough';
 
 export interface ScanResult {
   /** Present for live scans; used to link the Markdown report. */
@@ -192,6 +196,7 @@ export const DEFAULT_OPTIONS: ScanOptions = {
   findImprovements: true,
   checkAccessibility: true,
   maxPages: 5,
+  depth: 'quick',
 };
 
 export const SEVERITY_ORDER: Record<Severity, number> = {

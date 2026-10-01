@@ -50,6 +50,9 @@ class ScanOptions(ApiModel):
     find_improvements: bool = True
     check_accessibility: bool = True
     max_pages: int = Field(default=5, ge=1, le=10)
+    # quick: demo-sized, about two minutes. thorough: up to 30 minutes and many more
+    # actions, for coverage. Budgets are in Settings.budget().
+    depth: Literal["quick", "thorough"] = "quick"
 
 
 class ScanRequest(ApiModel):

@@ -33,6 +33,8 @@ resource "aws_ecs_task_definition" "api" {
         { name = "ANTHROPIC_MODEL", value = var.anthropic_model },
         { name = "AGENT_EFFORT", value = var.agent_effort },
         { name = "MAX_AGENT_STEPS", value = tostring(var.max_agent_steps) },
+        { name = "THOROUGH_AGENT_STEPS", value = tostring(var.thorough_agent_steps) },
+        { name = "THOROUGH_TIMEOUT_SECONDS", value = tostring(var.thorough_timeout_seconds) },
         { name = "DYNAMODB_TABLE", value = aws_dynamodb_table.scans.name },
         { name = "ARTIFACT_BUCKET", value = aws_s3_bucket.artifacts.bucket },
         { name = "AWS_REGION", value = var.aws_region },

@@ -28,10 +28,16 @@ class Settings(BaseSettings):
     agent_effort: str = "medium"
     review_effort: str = "medium"
 
-    # Budgets that keep a scan demo-sized and the bill predictable.
+    # Budgets that keep a scan demo-sized and the bill predictable. These are the
+    # quick scan's; a thorough scan trades time and cost for coverage.
     max_agent_steps: int = 30
     scan_timeout_seconds: int = 240
+    thorough_agent_steps: int = 100
+    thorough_timeout_seconds: int = 1800
     max_concurrent_scans: int = 2
+    # Thorough scans hold a slot for up to half an hour; capping them keeps a slot
+    # free for quick scans, such as a live demo.
+    max_thorough_scans: int = 1
     rate_limit_scans: int = 6
     rate_limit_window_seconds: int = 3600
     max_link_checks: int = 25
@@ -50,6 +56,12 @@ class Settings(BaseSettings):
     local_artifact_dir: str = ".artifacts"
     axe_path: str = "vendor/axe.min.js"
     log_level: str = "INFO"
+
+    def budget(self, depth: str) -> tuple[int, int]:
+        """(Claude actions, seconds) a scan of this depth may use."""
+        if depth == "thorough":
+            return self.thorough_agent_steps, self.thorough_timeout_seconds
+        return self.max_agent_steps, self.scan_timeout_seconds
 
     @property
     def cors_origin_list(self) -> list[str]:

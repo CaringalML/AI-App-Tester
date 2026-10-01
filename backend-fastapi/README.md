@@ -93,7 +93,7 @@ part-way leaves the scan listed and retryable rather than leaving orphaned files
 Every scan spends real API credit, and the service opens arbitrary URLs from inside AWS.
 
 - **SSRF:** hostnames are resolved and every address must be public. The guard is enforced inside the browser for all requests, so redirects and links cannot reach the VPC or the metadata service.
-- **Cost:** per-client rate limit, a cap on concurrent scans, a per-scan step budget, and a wall-clock limit that asks Claude to wrap up before it is cut off. The API reports token usage and estimated cost per scan.
+- **Cost:** per-client rate limit, a cap on concurrent scans, a per-scan step budget, and a wall-clock limit that asks Claude to wrap up before it is cut off. Two depths: quick (30 actions, 4 minutes, the default) and thorough (100 actions, 30 minutes, one at a time, so a quick scan always has a free slot). The API reports token usage and estimated cost per scan.
 - **Safe exploration:** the agent is told to use obviously fake data, never complete purchases or change settings, and stay on the site under test. Navigation off the site is refused in code.
 
 ## Choices worth knowing about

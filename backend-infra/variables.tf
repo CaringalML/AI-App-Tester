@@ -85,10 +85,34 @@ variable "agent_effort" {
   description = "Claude effort for the exploration loop: low, medium, high, xhigh or max."
   type        = string
   default     = "medium"
+
+  # The API accepts only these exact lowercase names; "Max" would fail every scan.
+  validation {
+    condition     = contains(["low", "medium", "high", "xhigh", "max"], var.agent_effort)
+    error_message = "agent_effort must be one of: low, medium, high, xhigh, max (lowercase)."
+  }
 }
 
 variable "max_agent_steps" {
-  description = "Browser actions Claude may take per scan. Caps both time and cost."
+  description = "Browser actions Claude may take in a quick scan (the default). Caps both time and cost."
   type        = number
   default     = 30
+}
+
+variable "thorough_agent_steps" {
+  description = "Browser actions Claude may take in a thorough scan, chosen per scan in the form."
+  type        = number
+  default     = 100
+}
+
+variable "thorough_timeout_seconds" {
+  description = "Wall-clock limit for a thorough scan, in seconds."
+  type        = number
+  default     = 1800
+
+  # The website stops waiting for a scan after 40 minutes (GIVE_UP_MS in src/lib/api.ts).
+  validation {
+    condition     = var.thorough_timeout_seconds >= 60 && var.thorough_timeout_seconds <= 2400
+    error_message = "thorough_timeout_seconds must be between 60 and 2400; the website waits at most 40 minutes."
+  }
 }

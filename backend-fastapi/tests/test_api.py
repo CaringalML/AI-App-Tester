@@ -16,8 +16,10 @@ class FakeRunner:
         self.capacity = capacity
         self.started: list[Scan] = []
 
-    def has_capacity(self) -> bool:
-        return self.capacity
+    thorough_capacity = True
+
+    def has_capacity(self, depth: str = "quick") -> bool:
+        return self.capacity and (depth != "thorough" or self.thorough_capacity)
 
     def start(self, scan: Scan) -> None:
         self.started.append(scan)
@@ -83,6 +85,23 @@ def test_busy_runner_returns_429(parts) -> None:
     client, _, runner = parts
     runner.capacity = False
     assert client.post("/scans", json={"url": "1.1.1.1"}).status_code == 429
+
+
+def test_a_second_thorough_scan_is_pointed_to_a_quick_one(parts) -> None:
+    client, _, runner = parts
+    runner.thorough_capacity = False
+    thorough = client.post("/scans", json={"url": "1.1.1.1", "options": {"depth": "thorough"}})
+    assert thorough.status_code == 429
+    assert "Run a quick scan" in thorough.json()["detail"]
+    quick = client.post("/scans", json={"url": "1.1.1.1", "options": {"depth": "quick"}})
+    assert quick.status_code == 202
+    assert client.get(f"/scans/{quick.json()['id']}").json()["options"]["depth"] == "quick"
+
+
+def test_scan_depth_is_validated(parts) -> None:
+    client, _, _ = parts
+    bad = client.post("/scans", json={"url": "1.1.1.1", "options": {"depth": "forever"}})
+    assert bad.status_code == 422
 
 
 def test_unknown_or_malformed_ids_are_404(parts) -> None:

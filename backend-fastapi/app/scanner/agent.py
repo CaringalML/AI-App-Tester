@@ -226,6 +226,7 @@ class ExplorationAgent:
         recorder: Recorder,
         scan_id: str,
         deadline: float,
+        budget: int | None = None,
     ) -> None:
         self.client = client
         self.settings = settings
@@ -237,6 +238,8 @@ class ExplorationAgent:
         self.recorder = recorder
         self.scan_id = scan_id
         self.deadline = deadline
+        # Tool calls this scan may make: the quick or the thorough budget.
+        self.budget = budget or settings.max_agent_steps
         self.labels: dict[str, str] = {}
         self.steps = 0
         self.summary: str | None = None
@@ -249,7 +252,7 @@ class ExplorationAgent:
         self._remember_labels(state)
         kickoff = (
             f"Site under test: {self.session.page.url}\n"
-            f"Action budget: {self.settings.max_agent_steps} tool calls.\n\n"
+            f"Action budget: {self.budget} tool calls.\n\n"
             f"Automated checks already recorded (do not re-report):\n{automated_brief}\n\n"
             f"Current page state:\n{format_page_state(state)}"
         )
@@ -290,13 +293,13 @@ class ExplorationAgent:
                     }
                 )
                 finished = finished or done
-            budget = max(1, self.settings.max_agent_steps)
+            budget = max(1, self.budget)
             await self.recorder.advance("exploring", 0.25 + 0.63 * min(1.0, self.steps / budget))
 
             if finished or self._exhausted():
                 return
 
-            remaining = self.settings.max_agent_steps - self.steps
+            remaining = self.budget - self.steps
             near_deadline = time.monotonic() > self.deadline - 45
             if not wrap_up_sent and (remaining <= 4 or near_deadline):
                 # Appended after the tool results, never edited into earlier turns.
@@ -311,7 +314,7 @@ class ExplorationAgent:
             messages.append({"role": "user", "content": results})
 
     def _exhausted(self) -> bool:
-        over_steps = self.steps >= self.settings.max_agent_steps + 2
+        over_steps = self.steps >= self.budget + 2
         return over_steps or time.monotonic() > self.deadline
 
     def _remember_labels(self, state: dict[str, Any]) -> None:
