@@ -169,6 +169,21 @@ export async function deleteScan(id: string, ownerToken: string): Promise<void> 
   if (!response.ok && response.status !== 404) throw new ScanError(await readError(response));
 }
 
+/** Stop a running scan early; the server keeps and reports what it found so far. */
+export async function stopScan(id: string, ownerToken: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/scans/${id}/stop`, {
+      method: 'POST',
+      headers: { 'X-Owner-Token': ownerToken },
+    });
+  } catch {
+    throw new ScanError('Could not reach the tester to stop this scan.');
+  }
+  // 409: it finished on its own in the meantime, which is what the user wanted anyway.
+  if (!response.ok && response.status !== 409) throw new ScanError(await readError(response));
+}
+
 export function testsUrl(scanId: string): string {
   return `${API_URL}/scans/${scanId}/tests.spec.ts`;
 }

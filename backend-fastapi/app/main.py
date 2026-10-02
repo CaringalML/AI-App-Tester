@@ -229,6 +229,25 @@ def create_app(
             )
         return summaries
 
+    @app.post("/scans/{scan_id}/stop", status_code=202, tags=["scans"])
+    async def stop_scan(
+        scan_id: str,
+        x_owner_token: str = Header(
+            default="", description="Token returned when the scan started."
+        ),
+    ) -> dict:
+        """Stop a running scan early. What it found so far is kept and reported."""
+        scan = await fetch(scan_id)
+        if not scan.owner_token_hash or not hmac.compare_digest(
+            scan.owner_token_hash, _hash_token(x_owner_token)
+        ):
+            raise HTTPException(
+                status_code=403, detail="Only the browser that started this scan can stop it."
+            )
+        if scan.status not in ("queued", "running") or not runner.stop(scan.id):
+            raise HTTPException(status_code=409, detail="This scan is not running.")
+        return {"status": "stopping"}
+
     @app.delete("/scans/{scan_id}", status_code=204, tags=["scans"])
     async def delete_scan(
         scan_id: str,

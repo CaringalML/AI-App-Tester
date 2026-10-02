@@ -20,6 +20,39 @@ def _scan(depth: str) -> Scan:
     )
 
 
+async def test_stopping_a_scan_keeps_what_it_found() -> None:
+    store = MemoryScanStore()
+    runner = ScanRunner(settings=Settings(_env_file=None), store=store, artifacts=None, client=None)
+
+    async def explores_forever(scan, reporter, collector, usage) -> None:  # noqa: ANN001
+        collector.add(
+            title="Login button does nothing",
+            category="bug",
+            severity="high",
+            confidence="high",
+            kind="functional",
+            source="agent",
+            location="/login",
+            evidence="Clicked it twice.",
+            steps=["Open /login"],
+            suggestion="Wire it up.",
+        )
+        await asyncio.Event().wait()
+
+    runner._execute = explores_forever  # type: ignore[method-assign]
+    scan = _scan("quick")
+    runner.start(scan)
+    await asyncio.sleep(0.05)
+    assert runner.stop(scan.id)
+    await asyncio.gather(*runner._tasks, return_exceptions=True)
+
+    saved = await store.get(scan.id)
+    assert saved.status == "done"
+    assert [f.title for f in saved.findings] == ["Login button does nothing"]
+    assert any("Stopped early" in note for note in saved.notes)
+    assert not runner.stop(scan.id)  # already finished
+
+
 async def test_one_thorough_scan_at_a_time_leaves_room_for_a_quick_one() -> None:
     runner = ScanRunner(
         settings=Settings(_env_file=None), store=MemoryScanStore(), artifacts=None, client=None

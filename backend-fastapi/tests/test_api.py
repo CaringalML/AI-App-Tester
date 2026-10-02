@@ -24,6 +24,9 @@ class FakeRunner:
     def start(self, scan: Scan) -> None:
         self.started.append(scan)
 
+    def stop(self, scan_id: str) -> bool:
+        return any(s.id == scan_id for s in self.started)
+
     async def shutdown(self) -> None:
         return None
 
@@ -79,6 +82,25 @@ def test_rate_limit_per_client(parts) -> None:
     assert codes == [202, 202, 429]
     other = client.post("/scans", json={"url": "1.1.1.1"}, headers={"cf-connecting-ip": "1.2.3.4"})
     assert other.status_code == 202
+
+
+def test_only_the_owner_can_stop_a_running_scan(parts) -> None:
+    client, store, _ = parts
+    started = client.post("/scans", json={"url": "1.1.1.1"}).json()
+    path = f"/scans/{started['id']}/stop"
+    assert client.post(path, headers={"X-Owner-Token": "wrong"}).status_code == 403
+    assert client.post(path, headers={"X-Owner-Token": started["ownerToken"]}).status_code == 202
+
+
+def test_a_finished_scan_cannot_be_stopped(parts) -> None:
+    client, store, _ = parts
+    started = client.post("/scans", json={"url": "1.1.1.1"}).json()
+    scan = store._scans[started["id"]]
+    store._scans[started["id"]] = scan.replace('"status":"queued"', '"status":"done"')
+    stop = client.post(
+        f"/scans/{started['id']}/stop", headers={"X-Owner-Token": started["ownerToken"]}
+    )
+    assert stop.status_code == 409
 
 
 def test_busy_runner_returns_429(parts) -> None:

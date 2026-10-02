@@ -21,6 +21,7 @@ import {
   fetchHistory,
   followScan,
   isLiveApi,
+  stopScan,
   startScan,
   type LiveUpdate,
 } from './lib/api';
@@ -295,6 +296,28 @@ export default function App() {
     }, 60);
   }
 
+  // Stopping keeps what was found: the scan finishes as "done" and polling shows it.
+  const [stopping, setStopping] = useState(false);
+  const ownerToken = history.find((e) => e.id === activeId)?.ownerToken;
+  useEffect(() => {
+    if (phase !== 'running') setStopping(false);
+  }, [phase]);
+
+  async function stopActive() {
+    if (!activeId || !ownerToken) return;
+    setStopping(true);
+    try {
+      await stopScan(activeId, ownerToken);
+    } catch (cause) {
+      setStopping(false);
+      setNotice({
+        ok: false,
+        title: 'Could not stop the test',
+        detail: cause instanceof Error ? cause.message : 'Something went wrong.',
+      });
+    }
+  }
+
   async function removeFromHistory(id: string) {
     const entry = history.find((e) => e.id === id);
     if (!entry) return;
@@ -482,28 +505,42 @@ export default function App() {
                   </span>
                 ) : null}
               </p>
-              {/* Desktop has New test in the sidebar; smaller screens and the
+              <div className="flex flex-none items-center gap-2">
+                {phase === 'running' && isLiveApi && ownerToken ? (
+                  <button
+                    type="button"
+                    onClick={stopActive}
+                    disabled={stopping}
+                    title="End the test now and keep what it has found so far"
+                    className="flex items-center gap-1.5 rounded-lg border border-critical/40 px-2.5 py-1.5 text-[12.5px] text-critical transition hover:bg-critical/10 disabled:opacity-60"
+                  >
+                    <span className="size-2.5 rounded-[2px] bg-current" aria-hidden="true" />
+                    {stopping ? 'Stopping…' : 'Stop'}
+                  </button>
+                ) : null}
+                {/* Desktop has New test in the sidebar; smaller screens and the
                   placeholder build (no sidebar) need a way back here. */}
-              <button
-                type="button"
-                onClick={newTest}
-                className={`flex flex-none items-center gap-1 rounded-lg border border-line-strong px-2.5 py-1.5 text-[12.5px] text-muted transition hover:border-accent/40 hover:text-ink ${
-                  isLiveApi ? 'lg:hidden' : ''
-                }`}
-              >
-                <svg
-                  className="size-3.5"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  aria-hidden="true"
+                <button
+                  type="button"
+                  onClick={newTest}
+                  className={`flex flex-none items-center gap-1 rounded-lg border border-line-strong px-2.5 py-1.5 text-[12.5px] text-muted transition hover:border-accent/40 hover:text-ink ${
+                    isLiveApi ? 'lg:hidden' : ''
+                  }`}
                 >
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-                New test
-              </button>
+                  <svg
+                    className="size-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                  New test
+                </button>
+              </div>
             </div>
           ) : null}
           <FindingsPanel

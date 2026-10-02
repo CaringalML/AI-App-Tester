@@ -184,6 +184,17 @@ class ScanRunner:
         self._active = 0
         self._thorough = 0
         self._tasks: set[asyncio.Task] = set()
+        self._by_scan: dict[str, asyncio.Task] = {}
+        self._stopping: set[str] = set()
+
+    def stop(self, scan_id: str) -> bool:
+        """Stop a running scan, keeping what it found. False if it is not running here."""
+        task = self._by_scan.get(scan_id)
+        if task is None or task.done():
+            return False
+        self._stopping.add(scan_id)
+        task.cancel()
+        return True
 
     def has_capacity(self, depth: str = "quick") -> bool:
         if self._active >= self.settings.max_concurrent_scans:
@@ -196,12 +207,15 @@ class ScanRunner:
         self._thorough += thorough
         task = asyncio.create_task(self._run(scan), name=f"scan-{scan.id}")
         self._tasks.add(task)
-        task.add_done_callback(lambda done: self._finished(done, thorough))
+        self._by_scan[scan.id] = task
+        task.add_done_callback(lambda done: self._finished(done, thorough, scan.id))
 
-    def _finished(self, task: asyncio.Task, thorough: bool) -> None:
+    def _finished(self, task: asyncio.Task, thorough: bool, scan_id: str) -> None:
         self._active -= 1
         self._thorough -= thorough
         self._tasks.discard(task)
+        self._by_scan.pop(scan_id, None)
+        self._stopping.discard(scan_id)
 
     async def shutdown(self) -> None:
         for task in list(self._tasks):
@@ -232,8 +246,13 @@ class ScanRunner:
         except (TargetNotAllowedError, ScanFailedError) as exc:
             scan.status, scan.error = "error", str(exc)
         except asyncio.CancelledError:
-            scan.status, scan.error = "error", "The scan was interrupted by a server restart."
-            raise
+            if scan.id not in self._stopping:
+                scan.status, scan.error = "error", "The scan was interrupted by a server restart."
+                raise
+            # Stopped on purpose: keep what was found rather than throwing the run away.
+            scan.notes.append("Stopped early at your request; these are the results so far.")
+            scan.findings = scan.findings or _apply_options(collector.items, scan.options)
+            scan.status = "done"
         except Exception:
             log.exception("scan %s failed", scan.id)
             scan.findings = scan.findings or _apply_options(collector.items, scan.options)
@@ -361,7 +380,9 @@ class ScanRunner:
                 scan.notes.append(f"AI exploration stopped early ({_api_reason(exc)}).")
             except PlaywrightError as exc:
                 scan.notes.append(f"AI exploration stopped early: {str(exc).splitlines()[0]}")
-            scan.agent_steps = agent.steps
+            finally:
+                # Counted even when the scan is stopped mid-exploration.
+                scan.agent_steps = agent.steps
             scan.notes.extend(agent.notes)
             # Errors the browser recorded during exploration are facts, whether or
             # not Claude chose to report them; the command log already shows them.
