@@ -31,10 +31,27 @@ def _decide(fid: str, action: str, **kw) -> Decision:
         finding_id=fid,
         action=action,
         merge_into=kw.get("merge_into", ""),
+        category=kw.get("category", "bug"),
         severity=kw.get("severity", "medium"),
         confidence=kw.get("confidence", "medium"),
         reason=kw.get("reason", "r"),
     )
+
+
+def test_reviewer_can_judge_a_rule_violation_by_what_the_element_does() -> None:
+    # axe rates an unnamed theme toggle "critical"; nobody is blocked by it.
+    toggle = _finding("f-1", source="automated", confidence="high")
+    kept, _ = apply_review(
+        [toggle], Review(summary="s", decisions=[_decide("f-1", "keep", category="improvement")])
+    )
+    assert kept[0].category == "improvement"
+
+
+def test_reviewer_cannot_turn_an_ungrounded_claim_into_a_bug() -> None:
+    claim = _finding("f-1", ids=[])
+    claim.category = "improvement"
+    kept, _ = apply_review([claim], Review(summary="s", decisions=[_decide("f-1", "keep")]))
+    assert kept[0].category == "improvement"
 
 
 def test_reviewer_can_drop_agent_noise_but_it_stays_visible() -> None:

@@ -39,6 +39,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
                     "finding_id": {"type": "string"},
                     "action": {"type": "string", "enum": ["keep", "merge", "drop"]},
                     "merge_into": {"type": "string"},
+                    "category": {"type": "string", "enum": ["bug", "improvement"]},
                     "severity": {"type": "string", "enum": _LEVELS},
                     "confidence": {"type": "string", "enum": _CONFIDENCE},
                     "reason": {"type": "string"},
@@ -47,6 +48,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
                     "finding_id",
                     "action",
                     "merge_into",
+                    "category",
                     "severity",
                     "confidence",
                     "reason",
@@ -64,6 +66,7 @@ class Decision(BaseModel):
     finding_id: str
     action: Literal["keep", "merge", "drop"]
     merge_into: str
+    category: Literal["bug", "improvement"]
     severity: Literal["critical", "high", "medium", "low"]
     confidence: Literal["high", "medium", "low"]
     reason: str
@@ -184,6 +187,10 @@ def apply_review(
             continue
 
         finding.severity = decision.severity
+        # Context the automated rules lack: an unnamed theme toggle is not a broken
+        # checkout button. Downgrading is always allowed; promoting to a bug needs evidence.
+        if decision.category == "improvement" or finding.evidence_ids:
+            finding.category = decision.category
         # The reviewer may lower confidence, but cannot promote an ungrounded claim.
         if finding.evidence_ids or _CONFIDENCE.index(decision.confidence) >= _CONFIDENCE.index(
             finding.confidence

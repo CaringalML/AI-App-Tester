@@ -87,6 +87,12 @@ observed; do not drop them unless they are clearly expected behaviour. Findings 
 source "agent" were written by an AI tester and must be supported by the evidence \
 excerpts listed with them; a finding marked UNGROUNDED cited no valid evidence.
 
+Category: "bug" only when a real person is blocked or gets a wrong result (they cannot \
+sign in, pay, submit, reach a page, or are misled). A rule violation that costs someone a \
+convenience rather than a task is an "improvement": an unnamed Pay button is a bug, an \
+unnamed theme toggle is an improvement. Automated accessibility rules rate impact without \
+knowing what the element does; judge it by what it does on this site.
+
 Severity: critical = data loss, security exposure, or a core flow completely unusable; \
 high = a core flow broken for many users; medium = a real defect with a workaround or \
 limited reach; low = minor or cosmetic.
