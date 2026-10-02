@@ -270,7 +270,7 @@ export function FindingCard({
       </button>
 
       {open ? (
-        <div className="grid animate-rise gap-4 [overflow-wrap:anywhere] border-t border-line px-4.5 pt-4 pb-4.5 pl-7.75">
+        <div className="grid animate-rise grid-cols-[minmax(0,1fr)] gap-4 [overflow-wrap:anywhere] border-t border-line px-4.5 pt-4 pb-4.5 pl-7.75">
           <section>
             <SectionHeading copy={() => bugText(finding, targetUrl)} label="what happened">
               What happened
