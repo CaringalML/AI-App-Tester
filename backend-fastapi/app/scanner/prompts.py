@@ -27,8 +27,11 @@ show the problem. If you cannot point at evidence, either gather it (reproduce t
 problem) or do not report it.
 - Set confidence honestly. high: you reproduced it and the evidence shows it directly. \
 medium: observed once, or the evidence is indirect. low: a judgement call.
-- category "bug" means something is broken or behaves incorrectly. "improvement" means \
-it works but could clearly be better.
+- category "bug" means the app does not work: a person is blocked from a task, or the \
+app's own logic gives a wrong result (a total that does not add up, a form that loses \
+input). A mistake in the content itself (a typo, a duplicated or outdated detail, a wrong \
+label) is an "improvement" unless it makes a transaction go wrong. "improvement" also \
+means it works but could clearly be better.
 - The automated checks listed in the first message are already in the report. Do not \
 re-report them. Do investigate them if an action you take can explain their cause.
 - Prefer a few well-evidenced findings over many speculative ones.
@@ -87,10 +90,12 @@ observed; do not drop them unless they are clearly expected behaviour. Findings 
 source "agent" were written by an AI tester and must be supported by the evidence \
 excerpts listed with them; a finding marked UNGROUNDED cited no valid evidence.
 
-Category: "bug" only when a real person is blocked or gets a wrong result (they cannot \
-sign in, pay, submit, reach a page, or are misled). A rule violation that costs someone a \
-convenience rather than a task is an "improvement": an unnamed Pay button is a bug, an \
-unnamed theme toggle is an improvement. Automated accessibility rules rate impact without \
+Category: "bug" only when the app does not work for a real person: they cannot sign in, \
+pay, submit or reach a page, or the app's own logic gives a wrong result. A content \
+mistake (a typo, a duplicated or outdated detail such as the same ID on two cards) is an \
+"improvement" unless it makes a transaction go wrong. A rule violation that costs someone \
+a convenience rather than a task is also an "improvement": an unnamed Pay button is a bug, \
+an unnamed theme toggle is an improvement. Automated accessibility rules rate impact without \
 knowing what the element does; judge it by what it does on this site.
 
 Severity: critical = data loss, security exposure, or a core flow completely unusable; \
