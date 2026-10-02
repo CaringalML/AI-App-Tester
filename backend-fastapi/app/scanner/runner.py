@@ -284,7 +284,7 @@ class ScanRunner:
                 status = await session.open(target)
             except PlaywrightError as exc:
                 raise ScanFailedError(
-                    f"The page could not be loaded: {str(exc).splitlines()[0][:200]}"
+                    f"The page could not be loaded: {str(exc).splitlines()[0][:400]}"
                 ) from exc
             start_url = session.page.url
             facts = observations.of_kind("page-facts")

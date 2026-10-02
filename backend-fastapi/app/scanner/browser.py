@@ -341,6 +341,8 @@ class BrowserSession:
         # came from, so a finding can say which CSS rule sets a colour.
         self._devtools_session = None
         self._stylesheets: dict[str, dict] = {}
+        # Requests the page has made that have not finished, to explain a page that hangs.
+        self._pending: dict[str, Request] = {}
 
     @property
     def accessibility_available(self) -> bool:
@@ -412,9 +414,21 @@ class BrowserSession:
     def _attach_listeners(self, page: Page) -> None:
         page.on("console", self._on_console)
         page.on("pageerror", self._on_page_error)
+        page.on("request", lambda request: self._pending.__setitem__(request.url, request))
+        page.on("requestfinished", lambda request: self._pending.pop(request.url, None))
         page.on("requestfailed", self._on_request_failed)
         page.on("response", self._on_response)
         page.on("dialog", self._on_dialog)
+
+    def _stalled(self) -> list[str]:
+        """Files the page asked for that have not arrived, shortest path first."""
+        wanted = ("document", "stylesheet", "script", "fetch", "xhr", "font")
+        paths = {
+            urlsplit(r.url).path or r.url
+            for r in self._pending.values()
+            if r.resource_type in wanted
+        }
+        return sorted(paths, key=len)
 
     def _current(self) -> str:
         return self.page.url if self.page else ""
@@ -440,6 +454,7 @@ class BrowserSession:
         self.log.add("page-error", self._current(), str(error)[:600], stack="\n".join(stack))
 
     def _on_request_failed(self, request: Request) -> None:
+        self._pending.pop(request.url, None)
         failure = request.failure or "unknown failure"
         host = urlsplit(request.url).hostname
         # Refused by the route guard or the egress proxy: the scanner's own safety
@@ -505,6 +520,19 @@ class BrowserSession:
             response = await self.page.goto(
                 url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS
             )
+        except PlaywrightTimeout as exc:
+            # The page arrived but never finished loading. Say which of its files are
+            # stuck: that is what a developer needs, and what a visitor would suffer.
+            stalled = self._stalled()
+            if not stalled:
+                raise
+            named = ", ".join(path[:60] for path in stalled[:2])
+            more = f" and {len(stalled) - 2} more" if len(stalled) > 2 else ""
+            raise PlaywrightError(
+                f"it did not finish loading within {NAV_TIMEOUT_MS // 1000} seconds; still "
+                f"waiting for {named}{more}. Visitors would see a blank or half-built page. "
+                "The site may be down or overloaded; try again in a few minutes."
+            ) from exc
         except PlaywrightError as exc:
             # goto rejects as soon as the request fails, but Chromium commits its
             # error page a moment later; wait for it, or that late commit cancels

@@ -32,6 +32,14 @@ it works but could clearly be better.
 - The automated checks listed in the first message are already in the report. Do not \
 re-report them. Do investigate them if an action you take can explain their cause.
 - Prefer a few well-evidenced findings over many speculative ones.
+- Report contradictions, not surprises. What the business sells and charges and how it \
+presents itself (prices, offers, product range, marketing copy, visual style) are the \
+owner's decisions: unusual is not wrong. Question them only when the site contradicts \
+itself (two prices for the same thing, a total that does not add up, a price that changes \
+at booking). This does not cover how the app behaves: errors, validation messages, \
+security and broken flows are always fair to report.
+- A guess about why something looks odd is not evidence. If a finding only holds when you \
+assume what the owner meant, or a cause you cannot see, do not report it.
 - Do not report missing accessible names, missing alt text, unlabelled form fields or low \
 colour contrast yourself. The automated accessibility checks test those against the real \
 page and are already in the report; the element list is a summary and can miss what they \
@@ -68,7 +76,11 @@ For each finding decide one action:
 the id of the finding that should represent both (prefer the better-evidenced one).
 - drop: it is not a real problem, is contradicted by the evidence, is pure speculation \
 with no supporting evidence, or is expected behaviour (for example a 401 from an API when \
-signed out, or a validation message that correctly blocks bad input).
+signed out, or a validation message that correctly blocks bad input). Also drop a business \
+decision presented as a defect (prices, offers, product range, marketing copy, branding) \
+unless the site contradicts itself, and any finding whose case rests on a guess about what \
+the owner intended or about a cause nobody observed. Unusual is not wrong. This does not \
+cover how the app behaves: misleading errors, validation, security and broken flows stay.
 
 Findings with source "automated" were recorded directly by the browser and are true as \
 observed; do not drop them unless they are clearly expected behaviour. Findings with \
