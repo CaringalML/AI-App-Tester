@@ -204,8 +204,11 @@ export function TestRunner({
           </span>
           <span title="Browser actions">{counts.actions} actions</span>
           {counts.failed ? (
-            <span className="text-critical" title="Actions that failed">
-              {counts.failed} failed
+            <span
+              className="text-medium"
+              title="Actions that did not go through, usually because the element was hidden, covered or moving. They are only findings when Claude confirmed a real problem."
+            >
+              {counts.failed} didn't complete
             </span>
           ) : null}
           <span className="text-medium" title="Findings reported">

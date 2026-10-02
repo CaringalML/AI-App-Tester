@@ -306,8 +306,9 @@ export function StepTimeline({ steps, live, pinned, following, now, onPin, onHov
                             </span>
                           ) : null}
                           {s.status === 'failed' ? (
-                            <span className="mt-0.5 block text-[11px] text-critical">
-                              Action did not complete
+                            <span className="mt-0.5 block text-[11px] leading-snug text-medium">
+                              Didn't complete, often a hidden, covered or moving element rather than
+                              a site problem. A finding only if Claude confirmed one.
                             </span>
                           ) : null}
                         </span>

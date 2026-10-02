@@ -40,6 +40,15 @@ class ObservationLog:
         self._by_id[observation.id] = observation
         return observation
 
+    @classmethod
+    def of(cls, items: list[Observation]) -> "ObservationLog":
+        """A view over existing observations, ids unchanged, for building findings from a slice."""
+        view = cls()
+        for item in items:
+            view._items.append(item)
+            view._by_id[item.id] = item
+        return view
+
     def __len__(self) -> int:
         return len(self._items)
 

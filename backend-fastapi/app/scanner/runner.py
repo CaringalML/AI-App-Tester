@@ -36,7 +36,7 @@ from ..security import TargetGuard, TargetNotAllowedError
 from ..store import ScanStore
 from .agent import ExplorationAgent, brief_automated
 from .browser import BrowserSession, page_key
-from .findings import FindingCollector, build_automated_findings
+from .findings import FindingCollector, build_automated_findings, build_exploration_findings
 from .observations import ObservationLog
 from .playwright_export import attach_automated_tests
 from .reviewer import review_findings
@@ -345,6 +345,7 @@ class ScanRunner:
                 deadline=deadline,
                 budget=steps,
             )
+            explored_from = len(observations)
             try:
                 await session.open(start_url)
                 await reporter.step(
@@ -362,6 +363,9 @@ class ScanRunner:
                 scan.notes.append(f"AI exploration stopped early: {str(exc).splitlines()[0]}")
             scan.agent_steps = agent.steps
             scan.notes.extend(agent.notes)
+            # Errors the browser recorded during exploration are facts, whether or
+            # not Claude chose to report them; the command log already shows them.
+            build_exploration_findings(observations.since(explored_from), collector, options)
             scan.visited_urls = list(session.visited)
 
         findings = list(collector.items)

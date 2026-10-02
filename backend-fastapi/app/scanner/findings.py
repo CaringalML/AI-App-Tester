@@ -73,6 +73,65 @@ def build_automated_findings(
         _metadata(log, collector)
 
 
+def build_exploration_findings(
+    observed: list[Observation], collector: FindingCollector, options: ScanOptions
+) -> None:
+    """Hard errors the browser recorded while Claude explored, as findings in their own right.
+
+    The automated checks run before exploration, so an error that a click set off
+    used to reach the report only if Claude chose to report it, while the command
+    log showed it. Only unambiguous failures count: uncaught exceptions, console
+    errors and 5xx responses. A 404 is left out, because Claude often opens a
+    missing page on purpose to see how the site handles it. Each finding cites the
+    action that triggered it, so it links to that step in the replay.
+    """
+    if not options.find_bugs:
+        return
+    errors = [
+        o
+        for o in observed
+        if o.kind in ("page-error", "console-error")
+        or (o.kind == "http-error" and int(o.data.get("status") or 0) >= 500)
+    ]
+    if not errors:
+        return
+    # The action whose outcome reported each error: the first one logged after it.
+    trigger: dict[str, Observation] = {}
+    waiting: list[str] = []
+    for o in observed:
+        if o.kind == "action":
+            trigger.update((error_id, o) for error_id in waiting)
+            waiting = []
+        elif o in errors:
+            waiting.append(o.id)
+
+    found = FindingCollector()
+    view = ObservationLog.of(errors)
+    _crashes(view, found)
+    _console_errors(view, found)
+    _network(view, found)
+    known = {f.title for f in collector.items}
+    for finding in found.items:
+        if finding.title in known:
+            continue  # already reported before exploration
+        actions = list(dict.fromkeys(trigger[i].id for i in finding.evidence_ids if i in trigger))
+        steps = list(finding.steps)
+        if actions:
+            did = re.sub(r"\be\d+ (?=\")", "", trigger_text(trigger, finding.evidence_ids))
+            steps.insert(1, f"Then: {did}")
+        collector.add(
+            **finding.model_dump(exclude={"id", "evidence_ids", "steps"}),
+            evidence_ids=finding.evidence_ids + actions,
+            steps=steps,
+        )
+
+
+def trigger_text(trigger: dict[str, Observation], ids: list[str]) -> str:
+    """'clicked "Login"' from the first triggering action's logged outcome."""
+    first = next(trigger[i] for i in ids if i in trigger)
+    return first.text.split(" | ")[0]
+
+
 def _ids(observations: list[Observation]) -> list[str]:
     return [o.id for o in observations][:8]
 

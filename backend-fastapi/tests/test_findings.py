@@ -2,6 +2,7 @@ from app.models import ScanOptions
 from app.scanner.findings import (
     FindingCollector,
     build_automated_findings,
+    build_exploration_findings,
     contrast_ratio,
     passing_colour,
 )
@@ -179,6 +180,38 @@ def test_each_example_element_can_be_found_in_devtools() -> None:
     assert target.html == '<a class="btn">Book now</a>'
     assert target.styles[0].rule == ".btn" and target.styles[0].element == "a.btn"
     assert target.styles[0].url == "https://spa.example/app.css"
+
+
+def test_errors_during_exploration_become_findings_linked_to_their_step() -> None:
+    log = ObservationLog()
+    log.add("console-error", PAGE, "Stripe key missing", source="app.js", line=4)
+    collector = FindingCollector()
+    build_automated_findings(log, collector, ScanOptions())
+    before = len(collector.items)
+
+    start = len(log)
+    log.add("console-error", PAGE, "Cannot read properties of null (reading 'total')")
+    log.add("console-error", PAGE, "Stripe key missing", source="app.js", line=4)
+    click = log.add("action", PAGE, 'clicked e15 "Pay now" | URL unchanged | 2 new signal(s)')
+    log.add(
+        "http-error",
+        "https://shop.example/missing",
+        "GET https://shop.example/missing returned HTTP 404",
+        url="https://shop.example/missing",
+        status=404,
+        resource="document",
+    )
+    log.add("action", "https://shop.example/missing", "navigated to https://shop.example/missing")
+    build_exploration_findings(log.since(start), collector, ScanOptions())
+
+    new = collector.items[before:]
+    # The click's error is reported; the error already known is not repeated, and the
+    # 404 Claude went looking for is expected behaviour, not a finding.
+    assert [f.title for f in new] == [
+        "Console error: Cannot read properties of null (reading 'total')"
+    ]
+    assert click.id in new[0].evidence_ids  # links to that step in the replay
+    assert new[0].steps[1] == 'Then: clicked "Pay now"'
 
 
 def test_contrast_ratio_matches_the_wcag_formula() -> None:
