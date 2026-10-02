@@ -10,6 +10,7 @@ import type {
   ScanOptions,
   ScanPhase,
   ScanResult,
+  ScanDepth,
   ScanStage,
   ScanSummary,
   TimelineStep,
@@ -63,6 +64,8 @@ export default function App() {
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [stage, setStage] = useState<ScanStage>('queued');
   const [completion, setCompletion] = useState(0);
+  // Quick or thorough, from the server for the scan on screen.
+  const [runDepth, setRunDepth] = useState<ScanDepth>('quick');
   const [notice, setNotice] = useState<FinishNotice | null>(null);
   const closeNotice = useCallback(() => setNotice(null), []);
 
@@ -196,6 +199,7 @@ export default function App() {
           setTarget(update.targetUrl);
           setStage(update.stage);
           setCompletion((previous) => Math.max(previous, update.completion));
+          setRunDepth(update.depth);
           if (update.status === 'running' || update.status === 'queued') {
             watchedLive = true;
             if (resumed && update.startedAt) setRunStartedAt(Date.parse(update.startedAt));
@@ -237,6 +241,7 @@ export default function App() {
     setPhase('running');
     setTarget(url);
     setRunStartedAt(Date.now());
+    setRunDepth(options.depth);
 
     if (!isLiveApi) {
       try {
@@ -495,6 +500,20 @@ export default function App() {
                 </span>
                 <span className="truncate text-[14px] text-ink" title={target}>
                   {displayUrl(target)}
+                </span>
+                <span
+                  className={`flex-none self-center rounded-full border px-2 py-px text-[11px] font-medium ${
+                    runDepth === 'thorough'
+                      ? 'border-improve/40 text-improve'
+                      : 'border-line-strong text-muted'
+                  }`}
+                  title={
+                    runDepth === 'thorough'
+                      ? 'Thorough scan: up to 30 minutes and 100 actions'
+                      : 'Quick scan: about 2 minutes, up to 30 actions'
+                  }
+                >
+                  {runDepth === 'thorough' ? 'Thorough' : 'Quick'}
                 </span>
                 {phase === 'running' ? (
                   <span className="hidden flex-none text-[12.5px] text-faint sm:inline">

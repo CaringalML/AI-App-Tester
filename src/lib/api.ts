@@ -7,6 +7,7 @@
  * progress log into the UI until it finishes.
  */
 import type {
+  ScanDepth,
   ScanOptions,
   ScanResult,
   ScanStage,
@@ -30,6 +31,7 @@ interface ApiScan extends Omit<ScanResult, 'pagesVisited'> {
   status: ScanStatus;
   stage?: ScanStage;
   completion?: number;
+  options?: { depth?: ScanDepth };
   error?: string | null;
   visitedUrls: string[];
   progress: { at: string; message: string; kind: string }[];
@@ -48,6 +50,7 @@ export interface LiveUpdate {
   stage: ScanStage;
   /** 0 to 1, from the server; only ever increases. */
   completion: number;
+  depth: ScanDepth;
 }
 
 async function readError(response: Response): Promise<string> {
@@ -138,6 +141,7 @@ export async function followScan(
       timeline: scan.timeline ?? [],
       stage: scan.stage ?? 'queued',
       completion: scan.completion ?? 0,
+      depth: scan.options?.depth ?? 'quick',
     });
 
     if (scan.status === 'error' && scan.findings.length === 0) {
