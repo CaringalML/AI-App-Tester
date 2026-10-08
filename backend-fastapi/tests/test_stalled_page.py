@@ -13,8 +13,14 @@ from app.scanner.browser import BrowserSession
 from app.scanner.observations import ObservationLog
 from app.security import TargetGuard
 
+# The script is requested and never arrives. In the head it holds back the whole
+# page; at the end of the body (where the-internet.herokuapp.com puts its own) the
+# content is already on screen and a visitor could use it.
+BLANK = b'<html><head><script src="/hang.js"></script></head><body>hi</body></html>'
+USABLE = b'<html><body><input name="user">hi<script src="/hang.js"></script></body></html>'
 
-async def test_a_page_stuck_on_a_file_names_the_file(monkeypatch) -> None:
+
+async def _open(monkeypatch, page: bytes):  # noqa: ANN202
     release = asyncio.Event()
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -22,11 +28,10 @@ async def test_a_page_stuck_on_a_file_names_the_file(monkeypatch) -> None:
         if b"GET /hang.js" in head:
             await release.wait()  # the file never arrives while the page waits for it
         else:
-            body = b'<html><head><script src="/hang.js"></script></head><body>hi</body></html>'
             writer.write(
                 b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n"
-                + f"Content-Length: {len(body)}\r\n\r\n".encode()
-                + body
+                + f"Content-Length: {len(page)}\r\n\r\n".encode()
+                + page
             )
             await writer.drain()
         writer.close()
@@ -43,13 +48,29 @@ async def test_a_page_stuck_on_a_file_names_the_file(monkeypatch) -> None:
         server.close()
         pytest.skip(f"Chromium is not installed here: {str(exc).splitlines()[0]}")
     try:
-        with pytest.raises(PlaywrightError) as caught:
-            await session.open(f"http://127.0.0.1:{port}/")
+        try:
+            return session, await session.open(f"http://127.0.0.1:{port}/")
+        except PlaywrightError as exc:
+            return session, exc
     finally:
         release.set()
         await session.__aexit__(None, None, None)
         server.close()
 
-    message = str(caught.value)
+
+async def test_a_page_stuck_on_a_file_names_the_file(monkeypatch) -> None:
+    _, outcome = await _open(monkeypatch, BLANK)
+    assert isinstance(outcome, PlaywrightError)
+    message = str(outcome)
     assert "did not finish loading within 2 seconds" in message
     assert "still waiting for /hang.js" in message
+
+
+async def test_a_slow_page_that_shows_its_content_is_still_tested(monkeypatch) -> None:
+    session, outcome = await _open(monkeypatch, USABLE)
+    assert not isinstance(outcome, PlaywrightError)
+    assert session.site is not None  # the scan carries on from here
+    assert len(session.slow_pages) == 1
+    assert "still waiting for /hang.js" in session.slow_pages[0]
+    assert "testing carried on" in session.slow_pages[0]
+    assert session.log.of_kind("page-stalled")

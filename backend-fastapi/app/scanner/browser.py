@@ -343,6 +343,8 @@ class BrowserSession:
         self._stylesheets: dict[str, dict] = {}
         # Requests the page has made that have not finished, to explain a page that hangs.
         self._pending: dict[str, Request] = {}
+        # Pages that never finished loading but showed content, so testing carried on.
+        self.slow_pages: list[str] = []
 
     @property
     def accessibility_available(self) -> bool:
@@ -528,11 +530,22 @@ class BrowserSession:
                 raise
             named = ", ".join(path[:60] for path in stalled[:2])
             more = f" and {len(stalled) - 2} more" if len(stalled) > 2 else ""
-            raise PlaywrightError(
-                f"it did not finish loading within {NAV_TIMEOUT_MS // 1000} seconds; still "
-                f"waiting for {named}{more}. Visitors would see a blank or half-built page. "
-                "The site may be down or overloaded; try again in a few minutes."
-            ) from exc
+            waiting = f"still waiting for {named}{more}"
+            if not await self._shows_content():
+                raise PlaywrightError(
+                    f"it did not finish loading within {NAV_TIMEOUT_MS // 1000} seconds; "
+                    f"{waiting}. Visitors would see a blank or half-built page. "
+                    "The site may be down or overloaded; try again in a few minutes."
+                ) from exc
+            # The content is on screen and only late files are missing: a visitor
+            # could use the page, so the test carries on and says what was slow.
+            message = (
+                f"{page_key(self.page.url)} was slow: after {NAV_TIMEOUT_MS // 1000} seconds "
+                f"it was {waiting}, but its content had appeared, so testing carried on."
+            )
+            self.log.add("page-stalled", self.page.url, message, stalled=stalled[:5])
+            self.slow_pages.append(message)
+            response = None
         except PlaywrightError as exc:
             # goto rejects as soon as the request fails, but Chromium commits its
             # error page a moment later; wait for it, or that late commit cancels
@@ -553,6 +566,21 @@ class BrowserSession:
         await self.settle()
         await self.audit_current_page()
         return response.status if response else None
+
+    async def _shows_content(self) -> bool:
+        """Whether a page still loading already shows something a visitor could use."""
+        assert self.page is not None
+        try:
+            return bool(
+                await asyncio.wait_for(
+                    self.page.evaluate(
+                        "() => !!document.body && document.body.innerText.trim().length > 0"
+                    ),
+                    timeout=3,
+                )
+            )
+        except (PlaywrightError, TimeoutError):
+            return False
 
     async def settle(self, idle_ms: int = 4_000) -> None:
         assert self.page is not None

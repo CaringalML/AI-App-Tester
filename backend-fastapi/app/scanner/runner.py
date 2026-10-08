@@ -404,6 +404,7 @@ class ScanRunner:
                 # not Claude chose to report them; the command log already shows them.
                 build_exploration_findings(observations.since(explored_from), collector, options)
                 scan.visited_urls = list(session.visited)
+                scan.notes.extend(dict.fromkeys(session.slow_pages))
 
         findings = list(collector.items)
         suppressed, summary = [], None
