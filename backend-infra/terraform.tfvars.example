@@ -19,6 +19,9 @@ max_agent_steps = 30
 # Thorough scan, chosen per scan in the form: up to 100 actions and 30 minutes.
 thorough_agent_steps     = 100
 thorough_timeout_seconds = 1800
+# Scans one client address may start per hour. A room on one office network shares
+# one address, so raise this for a demo and put it back afterwards.
+rate_limit_scans = 6
 
 task_cpu    = 1024
 task_memory = 2048

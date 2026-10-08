@@ -93,6 +93,12 @@ variable "agent_effort" {
   }
 }
 
+variable "rate_limit_scans" {
+  description = "Scans one client address may start per hour. Raise it for a demo where a whole room shares one office address."
+  type        = number
+  default     = 6
+}
+
 variable "max_agent_steps" {
   description = "Browser actions Claude may take in a quick scan (the default). Caps both time and cost."
   type        = number
