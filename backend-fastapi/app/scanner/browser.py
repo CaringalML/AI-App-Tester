@@ -356,10 +356,15 @@ class BrowserSession:
         # Fargate's /dev/shm is tiny; without this Chromium crashes on heavy pages.
         # Playwright also routes loopback through a configured proxy, and WebRTC is
         # kept off direct UDP, so no connection goes around the egress proxy.
+        # HTTP/1.1 only: Heroku's HTTP/2 router left half of a page's files hanging
+        # for headless Chromium (the-internet.herokuapp.com, 8 Oct 2026: never loaded
+        # over h2, ready in under 4s every time over HTTP/1.1). Every server speaks
+        # HTTP/1.1, and the protocol is not what a scan tests.
         self._browser = await self._pw.chromium.launch(
             args=[
                 "--disable-dev-shm-usage",
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                "--disable-http2",
             ],
             proxy={"server": proxy_url},
         )
