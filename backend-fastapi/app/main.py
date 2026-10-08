@@ -244,8 +244,15 @@ def create_app(
             raise HTTPException(
                 status_code=403, detail="Only the browser that started this scan can stop it."
             )
-        if scan.status not in ("queued", "running") or not runner.stop(scan.id):
-            raise HTTPException(status_code=409, detail="This scan is not running.")
+        if scan.status not in ("queued", "running"):
+            raise HTTPException(status_code=409, detail="This scan has already finished.")
+        if not runner.stop(scan.id):
+            # Another server process owns the task (a deploy in progress), so the
+            # scan carries on; the client must not pretend it stopped.
+            raise HTTPException(
+                status_code=503,
+                detail="This scan cannot be stopped right now; it will finish on its own.",
+            )
         return {"status": "stopping"}
 
     @app.delete("/scans/{scan_id}", status_code=204, tags=["scans"])

@@ -182,6 +182,7 @@ export default function App() {
     setError(null);
     setStage('queued');
     setCompletion(0);
+    setRunDepth('quick');
     setNotice(null);
   }
 

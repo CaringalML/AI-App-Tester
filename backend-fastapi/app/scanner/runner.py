@@ -192,6 +192,10 @@ class ScanRunner:
         task = self._by_scan.get(scan_id)
         if task is None or task.done():
             return False
+        # A second Stop (another tab, a double click) must not cancel again: the
+        # task may already be in its finally block saving the results.
+        if scan_id in self._stopping:
+            return True
         self._stopping.add(scan_id)
         task.cancel()
         return True
@@ -241,7 +245,7 @@ class ScanRunner:
             scan.stage, scan.completion = "done", 1.0
         except TimeoutError:
             scan.notes.append("The scan hit its time limit, so these results are partial.")
-            scan.findings = scan.findings or _apply_options(collector.items, scan.options)
+            self._keep_partial(scan, collector)
             scan.status = "done"
         except (TargetNotAllowedError, ScanFailedError) as exc:
             scan.status, scan.error = "error", str(exc)
@@ -251,11 +255,11 @@ class ScanRunner:
                 raise
             # Stopped on purpose: keep what was found rather than throwing the run away.
             scan.notes.append("Stopped early at your request; these are the results so far.")
-            scan.findings = scan.findings or _apply_options(collector.items, scan.options)
+            self._keep_partial(scan, collector)
             scan.status = "done"
         except Exception:
             log.exception("scan %s failed", scan.id)
-            scan.findings = scan.findings or _apply_options(collector.items, scan.options)
+            self._keep_partial(scan, collector)
             scan.status = "error"
             scan.error = "The scan hit an unexpected problem. Any results found are shown."
         finally:
@@ -266,6 +270,17 @@ class ScanRunner:
             scan.usage = usage.usage
             scan.finished_at = utcnow()
             await reporter.save()
+
+    @staticmethod
+    def _keep_partial(scan: Scan, collector: FindingCollector) -> None:
+        """A run that ended before its report: keep the raw findings and say so."""
+        if scan.findings:
+            return  # the review already ran and chose these
+        scan.findings = _apply_options(collector.items, scan.options)
+        if scan.findings:
+            scan.notes.append(
+                "The review step did not run, so these findings were not double-checked."
+            )
 
     async def _execute(
         self,
@@ -381,13 +396,14 @@ class ScanRunner:
             except PlaywrightError as exc:
                 scan.notes.append(f"AI exploration stopped early: {str(exc).splitlines()[0]}")
             finally:
-                # Counted even when the scan is stopped mid-exploration.
+                # All of this is kept even when the scan is stopped or times out
+                # mid-exploration: the stopped report promises "what it found so far".
                 scan.agent_steps = agent.steps
-            scan.notes.extend(agent.notes)
-            # Errors the browser recorded during exploration are facts, whether or
-            # not Claude chose to report them; the command log already shows them.
-            build_exploration_findings(observations.since(explored_from), collector, options)
-            scan.visited_urls = list(session.visited)
+                scan.notes.extend(agent.notes)
+                # Errors the browser recorded during exploration are facts, whether or
+                # not Claude chose to report them; the command log already shows them.
+                build_exploration_findings(observations.since(explored_from), collector, options)
+                scan.visited_urls = list(session.visited)
 
         findings = list(collector.items)
         suppressed, summary = [], None

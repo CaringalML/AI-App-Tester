@@ -44,12 +44,16 @@ async def test_stopping_a_scan_keeps_what_it_found() -> None:
     runner.start(scan)
     await asyncio.sleep(0.05)
     assert runner.stop(scan.id)
+    # A second Stop (another tab, a double click) while the task is still unwinding
+    # must not cancel it again: that would land inside the final save.
+    assert runner.stop(scan.id)
     await asyncio.gather(*runner._tasks, return_exceptions=True)
 
     saved = await store.get(scan.id)
     assert saved.status == "done"
     assert [f.title for f in saved.findings] == ["Login button does nothing"]
     assert any("Stopped early" in note for note in saved.notes)
+    assert any("review step did not run" in note for note in saved.notes)
     assert not runner.stop(scan.id)  # already finished
 
 

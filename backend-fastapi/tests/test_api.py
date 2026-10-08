@@ -103,6 +103,16 @@ def test_a_finished_scan_cannot_be_stopped(parts) -> None:
     assert stop.status_code == 409
 
 
+def test_a_scan_running_elsewhere_reports_it_cannot_be_stopped_here(parts) -> None:
+    client, store, runner = parts
+    started = client.post("/scans", json={"url": "1.1.1.1"}).json()
+    runner.started.clear()  # as if another process owned the task
+    stop = client.post(
+        f"/scans/{started['id']}/stop", headers={"X-Owner-Token": started["ownerToken"]}
+    )
+    assert stop.status_code == 503
+
+
 def test_busy_runner_returns_429(parts) -> None:
     client, _, runner = parts
     runner.capacity = False
